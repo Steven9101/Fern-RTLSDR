@@ -1,0 +1,64 @@
+# Fern-RTLSDR, an RTL-SDR input module for FernSDR.
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# On a tag v<version>: test, build a static package for every platform,
+# check the cross-built programs under QEMU, and attach the packages to the
+# GitHub release.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install compilers and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf \
+            libusb-1.0-0-dev pkg-config python3 qemu-user
+
+      - name: Check that the tag names the version in the Makefile
+        run: |
+          version=$(make -s print-version)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match version $version" >&2
+            exit 1
+          fi
+
+      - name: Test
+        run: make -j"$(nproc)" test
+
+      - name: Build the packages
+        run: |
+          for arch in x86_64 aarch64 armhf; do
+            make -j"$(nproc)" package ARCH=$arch
+          done
+
+      - name: Run the cross-built programs under QEMU
+        run: |
+          build/static-x86_64/fern-rtlsdr --describe > describe.json
+          qemu-aarch64 build/static-aarch64/fern-rtlsdr --describe | cmp - describe.json
+          qemu-arm build/static-armhf/fern-rtlsdr --describe | cmp - describe.json
+          qemu-aarch64 build/static-aarch64/fern-rtlsdr --list-devices
+          qemu-arm build/static-armhf/fern-rtlsdr --list-devices
+
+      - name: Attach the packages to the release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*.fernmod
+          fail_on_unmatched_files: true

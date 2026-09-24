@@ -1,0 +1,215 @@
+# Fern-RTLSDR
+
+Fern-RTLSDR lets [FernSDR](https://github.com/Steven9101/websdr) receive with
+an RTL-SDR dongle. It is an input module: a separate program that FernSDR
+starts for a band and talks to over pipes, as FernSDR's `docs/MODULES.md`
+describes. FernSDR sends the band's settings, the module opens and tunes the
+dongle, then writes the dongle's unsigned 8-bit I/Q samples to FernSDR
+unchanged, reports statistics once a second and accepts gain, AGC and bias
+tee changes while it runs.
+
+Keeping the USB and vendor code in a module means FernSDR itself links only
+the C and C++ runtime. The module is one statically linked executable; the
+librtlsdr and libusb it needs are built into it.
+
+## Hardware
+
+Any RTL2832U dongle with one of these tuners:
+
+- Rafael Micro R820T or R820T2, as on the RTL-SDR Blog V3 and most generic dongles
+- Rafael Micro R828D, as on the RTL-SDR Blog V4
+- Elonics E4000
+- Fitipower FC0012 and FC0013
+- FCI FC2580
+
+The module includes librtlsdr from the RTL-SDR Blog
+[rtl-sdr-blog](https://github.com/rtlsdrblog/rtl-sdr-blog) V1.4.0, which
+drives the RTL-SDR Blog V4 correctly: it switches the V4's inputs and uses its
+built-in upconverter below 28.8 MHz, so the V4 receives HF with
+`direct_sampling` off. On the RTL-SDR Blog V3, HF (below about 24 MHz) comes
+through the Q branch: set `module.direct_sampling = q`. Generic R820T dongles
+have nothing connected to the Q branch.
+
+Sample rates from 225001 to 300000 Hz and from 900001 to 3200000 Hz are
+possible. 2400000 is the highest rate that most computers sustain without
+losing samples.
+
+## Using it with FernSDR
+
+Install the package for your machine from the admin panel, which offers the
+releases of this repository, or from a shell:
+
+```sh
+fernsdr --install-module rtlsdr-0.1.0-linux-aarch64.fernmod fernsdr.conf
+```
+
+Then give a band `source = module`:
+
+```ini
+[band:20m]
+name          = 20 m
+source        = module
+module        = rtlsdr
+sample_rate   = 2400000
+center        = 14200000
+module.device = serial:00000001
+module.gain   = auto
+```
+
+`fern-rtlsdr --list-devices` prints the serial numbers of the dongles that are
+plugged in. With only one dongle, `module.device` can be left out.
+
+### Settings
+
+| key | type | default | changes while running | meaning |
+|---|---|---|---|---|
+| `device` | string | empty | no | `serial:<serial>` or `index:<n>`; empty when exactly one RTL-SDR is plugged in |
+| `gain` | string | `auto` | yes | `auto` for the tuner's AGC, or a gain in dB such as `38.6` |
+| `ppm` | number | 0 | no | crystal error in parts per million, -488 to 488 |
+| `rtl_agc` | boolean | no | yes | the RTL2832U's digital AGC |
+| `bias_tee` | boolean | no | yes | 4.5 V on the antenna input (RTL-SDR Blog V3 and V4) |
+| `direct_sampling` | choice | `off` | no | `off`, `i` or `q` |
+| `offset_tuning` | boolean | no | no | E4000, FC0012, FC0013 and FC2580 only |
+| `bandwidth` | number | 0 | no | tuner IF filter in Hz, 0 to 8000000; 0 follows the sample rate. R820T, R828D and E4000 only; `ready` reports the filter the tuner chose |
+| `buffers` | number | 16 | no | USB transfers in flight, 2 to 64, each about 20 ms of samples |
+
+`fern-rtlsdr --describe` prints the same list as JSON; the package manifest
+carries it too, and FernSDR checks a band's settings against it.
+
+### What the module reports
+
+The `ready` message tells FernSDR what the hardware actually does:
+
+- `sample_rate` is the rate the RTL2832U resampler runs at, computed the way
+  librtlsdr programs it. For 2400000 and 2048000 it is exact; for 1000000 it
+  is 1000000.026 Hz.
+- `center` is the frequency librtlsdr reports after tuning, which is the
+  frequency requested. The hardware tunes in steps: the R820T and R828D PLL
+  lands up to about 1.4 kHz (typically 200 Hz) away, and the RTL2832U's
+  digital mixer up to 7 Hz. The module does not yet correct the samples for
+  this, so the band can sit that far from where FernSDR shows it.
+- `settings.bandwidth` is the IF filter the tuner driver chose for the
+  requested bandwidth, or for the sample rate when none was requested;
+  0 in direct sampling.
+- `settings.gain` is the gain the tuner uses: a request is moved to the
+  nearest step the tuner has, and `set` answers with the step it chose.
+- `settings.bias_tee_effective` says whether the bias tee is really on. The
+  EEPROM of RTL-SDR Blog dongles can force it on whatever the setting says
+  (`rtl_eeprom -b 0` clears that); the module reads the EEPROM and reports
+  `true`, `false`, or `unknown` when the EEPROM cannot be read.
+
+The module refuses, with an error that says what to change, anything it
+cannot honour instead of guessing: a frequency the tuner cannot tune or whose
+PLL does not lock, HF on an R820T without direct sampling, offset tuning on
+R820T and R828D tuners (librtlsdr would switch the bias tee instead), a gain
+on a tuner that has none, a setting it does not know. When the dongle is
+unplugged or stops sending samples for 1.5 seconds, it reports `lost` and
+exits with status 5, and FernSDR starts it again.
+
+## Permissions
+
+The user FernSDR runs as needs read and write access to the dongle's USB
+device node, and the kernel's DVB driver must leave the dongle alone.
+
+Allow the `plugdev` group to use RTL2832U dongles, in
+`/etc/udev/rules.d/60-fern-rtlsdr.rules`:
+
+```
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2838", MODE="0660", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0bda", ATTRS{idProduct}=="2832", MODE="0660", GROUP="plugdev"
+```
+
+These two IDs cover the RTL-SDR Blog dongles and most generic ones; `lsusb`
+shows which one yours has. Then:
+
+```sh
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+sudo usermod -aG plugdev fernsdr     # the user FernSDR runs as
+```
+
+Stop the DVB-T driver from claiming the dongle, in
+`/etc/modprobe.d/blacklist-rtl-sdr.conf`:
+
+```
+blacklist dvb_usb_rtl28xxu
+```
+
+and unload it once with `sudo modprobe -r dvb_usb_rtl28xxu`, or reboot. The
+module tries to detach the driver itself when it finds it attached, but the
+blacklist is the reliable way.
+
+### FernSDR under systemd
+
+The unit that FernSDR's `install.sh` writes hides USB devices from the
+receiver (`PrivateDevices=yes`) and forbids the netlink socket that libusb
+uses to watch for USB devices (`RestrictAddressFamilies` without
+`AF_NETLINK`). A module started by FernSDR inherits both, and then reports
+exactly that in its error message. To let it reach the dongle, add a drop-in
+with `sudo systemctl edit fernsdr`:
+
+```ini
+[Service]
+PrivateDevices=no
+DeviceAllow=char-usb_device rw
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SupplementaryGroups=plugdev
+```
+
+`DeviceAllow` keeps every other device closed. The module runs under the
+unit's `SystemCallFilter=@system-service` and `MemoryDenyWriteExecute=yes`.
+
+## Running it by hand
+
+```sh
+fern-rtlsdr --describe        # the module and its settings, as JSON
+fern-rtlsdr --list-devices    # the RTL-SDRs this machine can see, as JSON
+```
+
+`--fernsdr-module 1` is how FernSDR starts it, with commands on fd 0,
+samples on fd 1, a log on fd 2 and events on fd 3.
+
+## Building
+
+You need GNU make, a C and C++ compiler with C++17 support, and Python 3 for
+packaging and tests. CMake is not used.
+
+```sh
+make                          # build/fern-rtlsdr, using the system libusb
+make static                   # build/static-x86_64/fern-rtlsdr, fully static
+make static ARCH=aarch64      # cross build, needs aarch64-linux-gnu-gcc and g++
+make static ARCH=armhf        # cross build, needs arm-linux-gnueabihf-gcc and g++
+make package ARCH=aarch64     # dist/rtlsdr-0.1.0-linux-aarch64.fernmod
+make test                     # unit, protocol, command line and package tests
+make test-asan                # the unit and protocol tests under ASan and UBSan
+```
+
+`make` needs the libusb development files (`apt install libusb-1.0-0-dev
+pkg-config`). `make static` and `make package` need none: they build the
+vendored librtlsdr and libusb, the latter without udev. On Debian and Ubuntu
+the cross compilers are the packages `gcc-aarch64-linux-gnu`,
+`g++-aarch64-linux-gnu`, `gcc-arm-linux-gnueabihf` and
+`g++-arm-linux-gnueabihf`.
+
+`armhf` means ARMv7 with hardware floating point (`-march=armv7-a
+-mfpu=vfpv3-d16 -mfloat-abi=hard`): every Raspberry Pi from the Pi 2 on, and
+other ARMv7 boards. The Pi Zero and the Pi 1 are ARMv6 and are not supported.
+A 64-bit operating system on a Pi 3, 4 or 5 uses the `aarch64` package.
+
+The tests need no dongle. A fake device that streams a known tone drives the
+same code as the real one through real pipes, and can simulate a busy, an
+unplugged and a stalled dongle.
+
+## Releases
+
+Pushing a tag `v<version>` that matches `VERSION` in the Makefile runs
+`.github/workflows/release.yml`: it runs the tests, builds the three static
+packages, runs the cross-built programs under QEMU and attaches
+`rtlsdr-<version>-linux-<platform>.fernmod` to the GitHub release.
+
+## License
+
+Fern-RTLSDR is free software under the GNU General Public License, version 2
+or (at your option) any later version; see [LICENSE](LICENSE). It includes
+librtlsdr from rtl-sdr-blog (GPL-2.0-or-later) and libusb (LGPL-2.1-or-later);
+see [third_party/README.md](third_party/README.md).
