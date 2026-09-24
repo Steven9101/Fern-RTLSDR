@@ -111,6 +111,16 @@ exits with status 5, and FernSDR starts it again.
 The user FernSDR runs as needs read and write access to the dongle's USB
 device node, and the kernel's DVB driver must leave the dongle alone.
 
+On a FernSDR installed as a systemd service, one command does all of this:
+
+```sh
+sudo ./install.sh --service --usb     # in the FernSDR checkout
+```
+
+It writes the udev rule for the receiver's own group, blacklists the DVB-T
+driver and lets the service open USB devices and nothing else. The rest of
+this section is what it does, for a setup it does not cover.
+
 Allow the `plugdev` group to use RTL2832U dongles, in
 `/etc/udev/rules.d/60-fern-rtlsdr.rules`:
 
