@@ -28,7 +28,9 @@ R820T/R828D PLL lock flag, which librtlsdr does not report
 ## libusb
 
 - Upstream: https://github.com/libusb/libusb
-- Tag: `v1.0.27`, commit `d52e355daa09f17ce64819122cb067b8a2ee0d4b`
+- Tag: `v1.0.30`, commit `87a55632db62c9bdc58cd31d3ccfa673f1bb017f`. From 1.0.27 because
+  of CVE-2026-23679 and CVE-2026-47104 in descriptor parsing, which neither
+  librtlsdr nor this module reaches, but which scanners flag in the binary.
 - License: LGPL-2.1-or-later, see `libusb/COPYING`; authors in `libusb/AUTHORS`
 - Files: `libusb/core.c`, `descriptor.c`, `hotplug.c`, `io.c`, `sync.c`,
   `strerror.c`, `os/linux_usbfs.c`, `os/linux_netlink.c`,
