@@ -101,6 +101,9 @@ public:
     void close_commands() { commands_.close_w(); }
     void close_samples() { samples_.close_r(); }
     void signal_stop() { REQUIRE(::write(stop_.w, "x", 1) == 1); }
+    // Makes the events pipe hold only one page, so that a few unread events
+    // fill it.
+    void shrink_events() { REQUIRE(::fcntl(events_.w, F_SETPIPE_SZ, 4096) >= 0); }
 
     // The next event on fd 3, or null after the timeout.
     Value event(int timeout_ms = 3000) {
@@ -416,6 +419,38 @@ TEST(session_stops_on_signal_with_a_blocked_writer) {
     CHECK_EQ(h.exit_status(), 0);
     CHECK(Clock::now() - start < std::chrono::milliseconds(1500));
     CHECK(backend.last()->closed);
+}
+
+TEST(session_stops_on_signal_while_fernsdr_does_not_read_events) {
+    // FernSDR alive but not reading fd 3: the module used to wait for room
+    // there with no limit, where SIGTERM could not reach it.
+    fake::Backend backend({fake::Spec{}});
+    Harness h(backend);
+    check_hello(h);
+    h.send(open_line);
+    h.expect("ready");
+    h.shrink_events();
+    for (int i = 0; i < 200; ++i)
+        h.send("{\"type\":\"set\",\"id\":" + std::to_string(i) + ",\"settings\":{\"gain\":38.6}}");
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto start = Clock::now();
+    h.signal_stop();
+    CHECK_EQ(h.exit_status(), 0);
+    CHECK(Clock::now() - start < std::chrono::milliseconds(1500));
+    CHECK(backend.last()->closed);
+}
+
+TEST(session_gives_up_on_events_nobody_reads) {
+    // And without a signal, it does not wait forever either.
+    fake::Backend backend({fake::Spec{}});
+    Harness h(backend);
+    check_hello(h);
+    h.send(open_line);
+    h.expect("ready");
+    h.shrink_events();
+    for (int i = 0; i < 200; ++i)
+        h.send("{\"type\":\"set\",\"id\":" + std::to_string(i) + ",\"settings\":{\"gain\":38.6}}");
+    CHECK_EQ(h.exit_status(6000), 1);  // exit_status::internal
 }
 
 TEST(session_stop_right_after_ready) {

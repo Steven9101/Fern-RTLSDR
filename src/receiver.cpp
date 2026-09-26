@@ -269,8 +269,9 @@ std::optional<Failure> Receiver::open(const OpenRequest& request) {
                                             "describes, then unplug and replug the dongle"};
     case usb_error::access:
         return Failure{ErrorCode::usb, "no permission to open " + which +
-                                           ". Install the udev rule from the README, make sure the user FernSDR "
-                                           "runs as is in the plugdev group, and replug the dongle"};
+                                           ". Run FernSDR's install.sh --service --usb, which lets the receiver's "
+                                           "own user open RTL-SDR dongles, or see the udev rule in the README for a "
+                                           "receiver installed another way; then replug the dongle"};
     case usb_error::no_device:
         return Failure{ErrorCode::no_device, which + " disappeared while it was being opened"};
     default:

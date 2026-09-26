@@ -38,6 +38,9 @@ bool blank(const std::string& s) {
     return true;
 }
 
+// How long one event may wait for FernSDR to read it.
+constexpr int event_timeout_ms = 2000;
+
 class Session {
 public:
     Session(Backend& backend, const SessionIo& io, const SessionOptions& options)
@@ -102,13 +105,22 @@ bool Session::send(const json::Value& event) {
         line = json::serialize(e);
     }
     line += '\n';
-    const int err = write_all(io_.events, line.data(), line.size());
+    // Bounded, and cut short by a stop signal: FernSDR alive but not reading
+    // fd 3 used to hold the module here, out of reach of SIGTERM, until it
+    // was killed and the clean close never ran.
+    const int err = write_all(io_.events, line.data(), line.size(), event_timeout_ms, io_.stop);
     if (err == 0)
         return true;
     events_broken_ = true;
     if (err == EPIPE) {
         log_line("FernSDR closed fd 3; stopping");
         finish(exit_status::stopped);
+    } else if (err == ECANCELED) {
+        log_line("stopping on a signal while FernSDR was not reading fd 3");
+        finish(exit_status::stopped);
+    } else if (err == ETIMEDOUT) {
+        log_line("FernSDR has not read fd 3 for %d ms; stopping", event_timeout_ms);
+        finish(exit_status::internal);
     } else {
         log_line("writing an event to fd 3 failed: %s", std::strerror(err));
         finish(exit_status::internal);
@@ -338,6 +350,14 @@ SessionResult Session::run() {
         log_line("could not create an eventfd: %s", std::strerror(errno));
         return SessionResult{exit_status::internal, true};
     }
+
+    // The event writes wait with a limit and watch for a stop, which only a
+    // non-blocking fd allows: a blocking write that FernSDR does not read
+    // waits in the kernel, where neither can reach it. This end is the
+    // module's own, so the flag changes nothing for FernSDR.
+    const int event_flags = ::fcntl(io_.events, F_GETFL);
+    if (event_flags >= 0)
+        (void)::fcntl(io_.events, F_SETFL, event_flags | O_NONBLOCK);
 
     json::Value hello = json::Value::object();
     hello.set("type", "hello");

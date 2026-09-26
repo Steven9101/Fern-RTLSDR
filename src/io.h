@@ -11,7 +11,12 @@ namespace fern {
 // Writes all len bytes, continuing after EINTR and partial writes and
 // waiting for room when the fd is non-blocking. Returns 0, or the errno of
 // the write that failed.
-int write_all(int fd, const void* data, size_t len);
+//
+// With timeout_ms >= 0 it waits no longer than that in all and then returns
+// ETIMEDOUT. With stop_fd >= 0 it returns ECANCELED as soon as that fd is
+// readable, without reading it, so a stop signal that arrives while FernSDR
+// is not reading still ends the wait.
+int write_all(int fd, const void* data, size_t len, int timeout_ms = -1, int stop_fd = -1);
 
 // Splits a byte stream into lines. A line longer than max_len bytes (not
 // counting the newline) is not kept: the reader reports it once as too_long
