@@ -154,9 +154,17 @@ def check(path, extract=None):
     if pos + length > len(data):
         raise Invalid("the file ends inside the manifest")
     try:
-        manifest = json.loads(data[pos:pos + length].decode("utf-8"), object_pairs_hook=no_duplicates)
+        manifest = json.loads(data[pos:pos + length].decode("utf-8"), object_pairs_hook=no_duplicates,
+                              parse_constant=refuse_constant)
     except (UnicodeDecodeError, ValueError) as e:
         raise Invalid("the manifest is not UTF-8 JSON: %s" % e)
+    try:
+        # A \ud800 escape on its own decodes to a string no UTF-8 can hold.
+        # FernSDR's parser refuses it, so a package that carries one must not
+        # pass here either.
+        json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        raise Invalid("the manifest contains a lone UTF-16 surrogate, which is not Unicode text")
     check_manifest(manifest)
     executable = data[pos + length:]
     if len(executable) != manifest["size"]:
@@ -176,6 +184,11 @@ def check(path, extract=None):
     return manifest
 
 
+def refuse_constant(name):
+    # Python's json takes NaN and Infinity; FernSDR's parser, rightly, does not.
+    raise Invalid("the manifest contains %s, which is not JSON" % name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("package")
@@ -184,7 +197,9 @@ def main():
     args = parser.parse_args()
     try:
         manifest = check(args.package, args.extract)
-    except (Invalid, OSError) as e:
+    except (Invalid, OSError, ValueError) as e:
+        # ValueError covers what slips past the checks, a lone surrogate that
+        # cannot be encoded among them: refused with a reason, not a traceback.
         sys.exit("%s: %s" % (args.package, e))
     if args.manifest:
         with open(args.manifest, "w", encoding="utf-8") as f:

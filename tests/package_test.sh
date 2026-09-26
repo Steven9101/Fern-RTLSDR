@@ -135,6 +135,19 @@ for case in uppercase_key reserved_key long_help leading_zero many_settings bad_
         pass "check_fernmod refuses a manifest with $case"
     fi
 done
+# Refused with a reason, not a traceback: Python's json reads a lone surrogate
+# and NaN where FernSDR's parser does not.
+remanifest lone_surrogate 'm["settings"][0]["help"] = "\ud800"'
+remanifest nan_number 'm["settings"][2]["min"] = float("nan")'
+for case in lone_surrogate nan_number; do
+    out=$(python3 "$here/tools/check_fernmod.py" "$tmp/$case"/*.fernmod 2>&1)
+    status=$?
+    if [ "$status" -eq 1 ] && ! printf '%s' "$out" | grep -q Traceback; then
+        pass "check_fernmod refuses a manifest with $case cleanly"
+    else
+        fail "check_fernmod does not refuse a manifest with $case cleanly (exit $status): $out"
+    fi
+done
 remanifest unchanged 'pass'
 if python3 "$here/tools/check_fernmod.py" "$tmp/unchanged"/*.fernmod >/dev/null 2>&1; then
     pass "check_fernmod accepts the rebuilt, unchanged manifest"
