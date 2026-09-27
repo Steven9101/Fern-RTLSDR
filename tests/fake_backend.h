@@ -37,6 +37,10 @@ struct Spec {
     bool fail_start = false;      // read_async() returns at once without data
     int fail_gain = 0;            // what set_tuner_gain() returns
     bool realtime = true;         // pace the samples at the sample rate
+    // When above 0, the tone's amplitude follows the gain the tuner is set
+    // to: this many steps from the midpoint at 0 dB (29.7 dB under the
+    // tuner's AGC), clipped at the converter's limits as a real one clips.
+    double tone_at_0_db = 0;
     unsigned open_delay_ms = 0;
     unsigned close_delay_ms = 0;  // how long closing takes
 };

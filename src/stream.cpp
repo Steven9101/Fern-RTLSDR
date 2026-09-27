@@ -147,6 +147,22 @@ void Stream::on_samples(unsigned char* buf, uint32_t len, void* ctx) {
     Stream* s = static_cast<Stream*>(ctx);
     s->bytes_received_.fetch_add(len, std::memory_order_relaxed);
     s->last_data_ns_.store(now_ns(), std::memory_order_relaxed);
+    // How hard the converter is driven, for the gain control and FernSDR:
+    // about a millisecond per second of samples, in this thread, which only
+    // copies otherwise.
+    unsigned peak = 0;
+    uint64_t clipped = 0;
+    for (uint32_t i = 0; i + 1 < len; i += 2) {
+        const unsigned a = buf[i] >= 128 ? buf[i] - 127u : 128u - buf[i];
+        const unsigned b = buf[i + 1] >= 128 ? buf[i + 1] - 127u : 128u - buf[i + 1];
+        const unsigned d = a > b ? a : b;
+        peak = d > peak ? d : peak;
+        clipped += d == 128;
+    }
+    s->samples_clipped_.fetch_add(clipped, std::memory_order_relaxed);
+    unsigned previous = s->peak_.load(std::memory_order_relaxed);
+    while (peak > previous && !s->peak_.compare_exchange_weak(previous, peak, std::memory_order_relaxed)) {
+    }
     if (s->stop_requested_.load(std::memory_order_relaxed))
         return;
     if (!s->ring_.push(buf, len)) {

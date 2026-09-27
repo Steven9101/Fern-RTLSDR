@@ -75,14 +75,17 @@ TEST(receiver_opens_the_only_device) {
     const fern::Effective& e = receiver.effective();
     CHECK_EQ(e.sample_rate, 2400000.0);
     CHECK_EQ(e.center, 14200000u);
-    CHECK(e.gain.automatic);
+    CHECK(e.gain.automatic());
     CHECK(e.bias_tee_effective.has_value());
     CHECK(!*e.bias_tee_effective);
     const auto st = backend.last();
     CHECK_EQ(st->sample_rate, 2400000u);
     CHECK_EQ(st->center, 14200000u);
     CHECK_EQ(st->reset_buffer_calls, 1);
-    CHECK(!st->manual_gain);
+    // gain = auto is the module's own control, which starts at 29.7 dB.
+    CHECK(st->manual_gain);
+    CHECK_EQ(st->gain, 297);
+    CHECK_EQ(e.gain_now, 29.7);
     const std::string device = fern::json::serialize(receiver.device_json());
     CHECK_EQ(device, std::string("{\"name\":\"RTL-SDR Blog V4\",\"serial\":\"00000001\",\"tuner\":\"R828D\",\"index\":0}"));
     receiver.close();
@@ -318,9 +321,9 @@ TEST(receiver_snaps_and_checks_gain) {
     fake::Backend backend({spec("A")});
     fern::Receiver receiver(backend);
     fern::OpenRequest r = request();
-    r.settings.gain = fern::GainSetting{false, 38.0};
+    r.settings.gain = fern::GainSetting::manual(38.0);
     REQUIRE(!receiver.open(r));
-    CHECK(!receiver.effective().gain.automatic);
+    CHECK(!receiver.effective().gain.automatic());
     CHECK_EQ(receiver.effective().gain.db, 38.6);
     const auto st = backend.last();
     CHECK(st->manual_gain);
@@ -329,36 +332,49 @@ TEST(receiver_snaps_and_checks_gain) {
 
     // Changing a manual gain does not pass through the lowest step again.
     fern::LiveChange c;
-    c.gain = fern::GainSetting{false, 20};
+    c.gain = fern::GainSetting::manual(20);
     REQUIRE(!receiver.apply(c));
     CHECK_EQ(st->gain, 197);
     CHECK_EQ(std::count(st->calls.begin(), st->calls.end(), std::string("set_tuner_gain_mode 1")), 1L);
     CHECK_EQ(fern::json::serialize(receiver.settings_json(c)), std::string("{\"gain\":19.7}"));
 
-    c.gain = fern::GainSetting{false, 55};
+    c.gain = fern::GainSetting::manual(55);
     auto f = receiver.apply(c);
     REQUIRE(f);
     CHECK(f->code == ErrorCode::invalid);
     CHECK_HAS(f->message, "gain 55 dB is outside the range of the R820T tuner, 0 to 49.6 dB");
     CHECK_EQ(st->gain, 197);
-    c.gain = fern::GainSetting{false, 50.5};
+    c.gain = fern::GainSetting::manual(50.5);
     CHECK(!receiver.apply(c));
     CHECK_EQ(st->gain, 496);
 
-    c.gain = fern::GainSetting{true, 0};
+    c.gain = fern::GainSetting();
+    REQUIRE(!receiver.apply(c));
+    CHECK(st->manual_gain);
+    CHECK_EQ(st->gain, 297);
+    CHECK_EQ(receiver.gain_step(), 16u);
+    CHECK_EQ(fern::json::serialize(receiver.settings_json(c)), std::string("{\"gain\":\"auto\"}"));
+    // The steps the control moves through.
+    REQUIRE(!receiver.set_gain_step(12));
+    CHECK_EQ(st->gain, 207);
+    CHECK_EQ(receiver.effective().gain_now, 20.7);
+
+    // gain = tuner is the tuner's own AGC, as auto used to be.
+    c.gain = fern::GainSetting::tuner_agc();
     REQUIRE(!receiver.apply(c));
     CHECK(!st->manual_gain);
-    CHECK_EQ(fern::json::serialize(receiver.settings_json(c)), std::string("{\"gain\":\"auto\"}"));
+    CHECK_EQ(fern::json::serialize(receiver.settings_json(c)), std::string("{\"gain\":\"tuner\"}"));
+    CHECK(receiver.set_gain_step(12));
 }
 
 TEST(receiver_refuses_gain_that_cannot_work) {
     fern::OpenRequest r = request(400000000);
-    r.settings.gain = fern::GainSetting{false, 10};
+    r.settings.gain = fern::GainSetting::manual(10);
     fake::Backend fc2580({spec("A", Tuner::fc2580)});
     CHECK_HAS(refused(fc2580, r, ErrorCode::invalid), "the FC2580 tuner has no adjustable gain");
     fake::Backend r820t({spec("A")});
     fern::OpenRequest ds = request(7000000);
-    ds.settings.gain = fern::GainSetting{false, 10};
+    ds.settings.gain = fern::GainSetting::manual(10);
     ds.settings.direct_sampling = DirectSampling::q;
     CHECK_HAS(refused(r820t, ds, ErrorCode::invalid), "module.gain has no effect");
 }
@@ -368,7 +384,7 @@ TEST(receiver_reports_a_failed_gain_write) {
     s.fail_gain = -1;
     fake::Backend backend({s});
     fern::OpenRequest r = request();
-    r.settings.gain = fern::GainSetting{false, 30};
+    r.settings.gain = fern::GainSetting::manual(30);
     const std::string m = refused(backend, r, ErrorCode::usb);
     CHECK_HAS(m, "setting the tuner gain to 29.7 dB failed");
 }

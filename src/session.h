@@ -9,6 +9,7 @@
 #include <cstddef>
 
 #include "device.h"
+#include "gain_control.h"
 
 namespace fern {
 
@@ -31,6 +32,9 @@ struct SessionOptions {
     // after 2 s.
     std::chrono::milliseconds shutdown_timeout{1500};
     size_t ring_bytes = 8u << 20;
+    // gain = auto; the settle time is at least what the USB transfers in
+    // flight hold.
+    GainControlTiming gain_timing;
 };
 
 struct SessionResult {

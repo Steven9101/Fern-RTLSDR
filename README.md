@@ -64,7 +64,7 @@ plugged in. With only one dongle, `module.device` can be left out.
 | key | type | default | changes while running | meaning |
 |---|---|---|---|---|
 | `device` | string | empty | no | `serial:<serial>` or `index:<n>`; empty when exactly one RTL-SDR is plugged in |
-| `gain` | string | `auto` | yes | `auto` for the tuner's AGC, or a gain in dB such as `38.6` |
+| `gain` | string | `auto` | yes | `auto` for the module's own control, `tuner` for the tuner's AGC, or a gain in dB such as `38.6` |
 | `ppm` | number | 0 | no | crystal error in parts per million, -488 to 488 |
 | `rtl_agc` | boolean | no | yes | the RTL2832U's digital AGC |
 | `bias_tee` | boolean | no | yes | 4.5 V on the antenna input (RTL-SDR Blog V3 and V4) |
@@ -75,6 +75,21 @@ plugged in. With only one dongle, `module.device` can be left out.
 
 `fern-rtlsdr --describe` prints the same list as JSON; the package manifest
 carries it too, and FernSDR checks a band's settings against it.
+
+### Gain
+
+With `gain = auto` the module sets the tuner's gain itself: the highest step
+that keeps the RTL2832U's 8-bit converter out of clipping with 6 dB to spare.
+It starts at 29.7 dB. When more than one sample in 10,000 clips it comes down
+a step at once, 6 dB when more than one in 100 does, and it goes up a step
+only once nothing has clipped for 5 seconds, in the first two minutes, or a
+minute after that, and the peaks would stay 6 dB under full scale one step
+higher. Clipped samples are lost to every listener, and a converter driven
+past its limit splatters over the whole band; a gain that stays well under
+the limit gives away sensitivity. `gain = tuner` leaves the gain to the
+tuner's own AGC, which watches the tuner's power detectors rather than the
+converter, and a number fixes the gain. FernSDR's S-meter calibration holds
+at the gain it was made at, so a calibrated band wants a fixed gain.
 
 ### What the module reports
 
@@ -100,8 +115,11 @@ The `ready` message tells FernSDR what the hardware actually does:
 - `settings.bandwidth` is the IF filter the tuner driver chose for the
   requested bandwidth, or for the sample rate when none was requested;
   0 in direct sampling.
-- `settings.gain` is the gain the tuner uses: a request is moved to the
-  nearest step the tuner has, and `set` answers with the step it chose.
+- `settings.gain` is `auto`, `tuner`, or the gain the tuner uses: a request
+  is moved to the nearest step the tuner has, and `set` answers with the step
+  it chose.
+- `stats` carry `clipped`, the samples whose I or Q sat at 0 or 255 since
+  `ready`, and with `gain = auto` the `gain` in use.
 - `settings.bias_tee_effective` says whether the bias tee is really on. The
   EEPROM of RTL-SDR Blog dongles can force it on whatever the setting says
   (`rtl_eeprom -b 0` clears that); the module reads the EEPROM and reports

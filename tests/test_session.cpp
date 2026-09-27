@@ -308,6 +308,44 @@ TEST(session_full_exchange) {
     CHECK_EQ(st->buf_len, 98304u);
 }
 
+TEST(session_brings_the_gain_down_when_the_converter_clips) {
+    fake::Spec spec;
+    // 200 steps from the midpoint at 29.7 dB, where gain = auto starts: the
+    // converter clips most of the time.
+    spec.tone_at_0_db = 6.55;
+    fake::Backend backend({spec});
+    fern::SessionOptions options = quick_options();
+    options.gain_timing.settle = std::chrono::milliseconds(100);
+    Harness h(backend, options);
+    check_hello(h);
+    h.send(open_line);
+    const Value ready = h.expect("ready");
+    CHECK_EQ(text_of(*ready.find("settings"), "gain"), std::string("auto"));
+    // 6 dB down at once, to 22.9 dB, where the tone peaks at 92 of 128.
+    double gain = 0;
+    double clipped = 0;
+    const auto deadline = Clock::now() + std::chrono::seconds(5);
+    while (gain != 22.9 && Clock::now() < deadline) {
+        h.drain_samples(50);
+        const Value stats = h.expect("stats");
+        REQUIRE(stats.find("clipped") && stats.find("gain"));
+        clipped = stats.find("clipped")->as_number();
+        gain = stats.find("gain")->as_number();
+    }
+    CHECK_EQ(gain, 22.9);
+    CHECK(clipped > 0);
+    CHECK_EQ(backend.last()->gain, 229);
+    // And there it stays: at 25.4 dB the peaks would be 122 of 128.
+    h.drain_samples(1000);
+    CHECK_EQ(h.expect("stats").find("gain")->as_number(), 22.9);
+    // Under the tuner's AGC the module leaves the gain alone and says none.
+    h.send("{\"type\":\"set\",\"id\":1,\"settings\":{\"gain\":\"tuner\"}}");
+    CHECK_EQ(fern::json::serialize(h.expect("applied")),
+             std::string("{\"type\":\"applied\",\"id\":1,\"settings\":{\"gain\":\"tuner\"}}"));
+    CHECK(!backend.last()->manual_gain);
+    CHECK(!h.expect("stats").find("gain"));
+}
+
 TEST(session_works_with_nonblocking_fds) {
     fake::Spec fast;
     fast.realtime = false;

@@ -70,6 +70,12 @@ public:
     uint64_t samples_delivered() const { return bytes_written_.load() / 2; }
     uint64_t samples_dropped() const { return bytes_dropped_.load() / 2; }
     uint64_t bytes_received() const { return bytes_received_.load(); }
+    // Samples whose I or Q sat at the converter's limit, 0 or 255, since
+    // start(); dropped ones too, since the converter clipped them all the same.
+    uint64_t samples_clipped() const { return samples_clipped_.load(); }
+    // The largest distance of I or Q from the midpoint since the last call:
+    // 1 to 128, 128 being a clipped sample; 0 when nothing arrived.
+    unsigned take_peak() { return peak_.exchange(0); }
     // steady_clock time of the last USB callback, or of start() before one.
     std::chrono::steady_clock::time_point last_data() const;
 
@@ -96,6 +102,8 @@ private:
     std::atomic<int> writer_errno_{0};
 
     std::atomic<uint64_t> bytes_received_{0};
+    std::atomic<uint64_t> samples_clipped_{0};
+    std::atomic<unsigned> peak_{0};
     std::atomic<uint64_t> bytes_dropped_{0};
     std::atomic<uint64_t> bytes_written_{0};
     std::atomic<int64_t> last_data_ns_{0};

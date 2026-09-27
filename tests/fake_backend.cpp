@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "fake_backend.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
@@ -273,8 +274,23 @@ public:
                 next += block;
             }
             lock.unlock();
-            for (uint32_t i = 0; i < buf_len; ++i)
-                buf[i] = tone_byte(produced_ + i);
+            if (spec_.tone_at_0_db > 0) {
+                double gain_db;
+                {
+                    std::lock_guard<std::mutex> state_lock(state_->mutex);
+                    gain_db = state_->manual_gain ? state_->gain / 10.0 : 29.7;
+                }
+                const double amplitude = spec_.tone_at_0_db * std::pow(10.0, gain_db / 20);
+                for (uint32_t i = 0; i < buf_len; ++i) {
+                    const uint64_t n = produced_ + i;
+                    const double phase = 2 * 3.14159265358979323846 * static_cast<double>(n / 2 % 16) / 16;
+                    const double v = 127.5 + amplitude * (n % 2 == 0 ? std::cos(phase) : std::sin(phase));
+                    buf[i] = static_cast<uint8_t>(std::clamp(std::lround(v), 0L, 255L));
+                }
+            } else {
+                for (uint32_t i = 0; i < buf_len; ++i)
+                    buf[i] = tone_byte(produced_ + i);
+            }
             cb(buf.data(), buf_len, ctx);
             produced_ += buf_len;
             lock.lock();

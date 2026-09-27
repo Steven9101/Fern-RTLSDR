@@ -122,20 +122,29 @@ std::optional<Failure> parse_device(const json::Value& v, DeviceSelector& out) {
     return std::nullopt;
 }
 
-// The schema declares gain as a string ("auto" or a number of dB); a JSON
-// number is accepted as well because set may carry one.
+bool same_word(const std::string& s, const char* word) {
+    size_t i = 0;
+    for (; word[i] != '\0'; ++i)
+        if (i >= s.size() || std::tolower(static_cast<unsigned char>(s[i])) != word[i])
+            return false;
+    return i == s.size();
+}
+
+// The schema declares gain as a string ("auto", "tuner" or a number of dB);
+// a JSON number is accepted as well because set may carry one.
 std::optional<Failure> parse_gain(const json::Value& v, GainSetting& out) {
-    const std::string wrong = "module.gain must be auto or a gain in dB such as 38.6, not ";
+    const std::string wrong = "module.gain must be auto, tuner or a gain in dB such as 38.6, not ";
     double db;
     if (v.is_number()) {
         db = v.as_number();
     } else if (v.is_string()) {
         const std::string& s = v.as_string();
-        if (s.size() == 4 && std::tolower(static_cast<unsigned char>(s[0])) == 'a' &&
-            std::tolower(static_cast<unsigned char>(s[1])) == 'u' &&
-            std::tolower(static_cast<unsigned char>(s[2])) == 't' &&
-            std::tolower(static_cast<unsigned char>(s[3])) == 'o') {
-            out = GainSetting{true, 0};
+        if (same_word(s, "auto")) {
+            out = GainSetting();
+            return std::nullopt;
+        }
+        if (same_word(s, "tuner")) {
+            out = GainSetting::tuner_agc();
             return std::nullopt;
         }
         const char* first = s.data();
@@ -148,7 +157,7 @@ std::optional<Failure> parse_gain(const json::Value& v, GainSetting& out) {
     }
     if (!std::isfinite(db) || db < -100 || db > 100)
         return invalid(wrong + shown(v));
-    out = GainSetting{false, db};
+    out = GainSetting::manual(db);
     return std::nullopt;
 }
 
@@ -315,8 +324,10 @@ json::Value settings_schema() {
             s.set("label", "Gain");
             s.set("default", "auto");
             s.set("help",
-                  "auto lets the tuner's AGC choose, or a gain in dB such as 38.6. The nearest gain the "
-                  "tuner supports is used and reported.");
+                  "auto chooses the highest gain that keeps the converter out of clipping with 6 dB to "
+                  "spare, and lowers it at once when something clips; tuner leaves it to the tuner's own "
+                  "AGC; or a gain in dB such as 38.6, of which the nearest the tuner supports is used and "
+                  "reported.");
             break;
         case Key::ppm:
             s.set("type", "number");

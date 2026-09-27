@@ -60,7 +60,7 @@ TEST(open_defaults) {
     CHECK_EQ(r.center, 14200000u);
     const fern::ModuleSettings& s = r.settings;
     CHECK(s.device.kind == fern::DeviceSelector::Kind::only);
-    CHECK(s.gain.automatic);
+    CHECK(s.gain.automatic());
     CHECK_EQ(s.ppm, 0);
     CHECK(!s.rtl_agc);
     CHECK(!s.bias_tee);
@@ -81,7 +81,7 @@ TEST(open_reads_every_setting) {
     const fern::ModuleSettings& s = r.settings;
     CHECK(s.device.kind == fern::DeviceSelector::Kind::serial);
     CHECK_EQ(s.device.serial, std::string("ABC 1"));
-    CHECK(!s.gain.automatic);
+    CHECK(!s.gain.automatic());
     CHECK_EQ(s.gain.db, 38.6);
     CHECK_EQ(s.ppm, -12);
     CHECK(s.rtl_agc);
@@ -98,7 +98,7 @@ TEST(open_reads_every_setting) {
     CHECK(r.settings.direct_sampling == fern::DirectSampling::i);
     REQUIRE(!try_open(open_with("{\"device\":\"\",\"gain\":\"AUTO\",\"direct_sampling\":\"off\"}"), r));
     CHECK(r.settings.device.kind == fern::DeviceSelector::Kind::only);
-    CHECK(r.settings.gain.automatic);
+    CHECK(r.settings.gain.automatic());
     REQUIRE(!try_open(open_with("{\"gain\":\"-1.5\"}"), r));
     CHECK_EQ(r.settings.gain.db, -1.5);
 }
@@ -145,7 +145,7 @@ TEST(open_refuses_wrong_types_and_values) {
     CHECK_HAS(refusal(open_with("{\"device\":\"index:-1\"}")), "module.device must be");
     CHECK_HAS(refusal(open_with("{\"device\":\"index:1a\"}")), "module.device must be");
     CHECK_HAS(refusal(open_with("{\"device\":\"index:4294967296\"}")), "module.device must be");
-    CHECK_HAS(refusal(open_with("{\"gain\":\"loud\"}")), "module.gain must be auto or a gain in dB");
+    CHECK_HAS(refusal(open_with("{\"gain\":\"loud\"}")), "module.gain must be auto, tuner or a gain in dB");
     CHECK_HAS(refusal(open_with("{\"gain\":\"\"}")), "module.gain");
     CHECK_HAS(refusal(open_with("{\"gain\":\"38.6 dB\"}")), "module.gain");
     CHECK_HAS(refusal(open_with("{\"gain\":\"nan\"}")), "module.gain");
@@ -194,7 +194,7 @@ TEST(set_accepts_only_live_settings) {
     CHECK(*c.rtl_agc);
     CHECK(!*c.bias_tee);
     REQUIRE(!fern::parse_set(json("{\"gain\":\"auto\"}"), c));
-    CHECK(c.gain && c.gain->automatic);
+    CHECK(c.gain && c.gain->automatic());
     CHECK(!c.rtl_agc && !c.bias_tee);
     REQUIRE(!fern::parse_set(json("{}"), c));
     CHECK(!c.gain && !c.rtl_agc && !c.bias_tee);

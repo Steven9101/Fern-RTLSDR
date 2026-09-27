@@ -318,11 +318,13 @@ Failure Receiver::tune_failure(uint32_t center) const {
 }
 
 std::optional<Failure> Receiver::check_gain(const GainSetting& gain, bool direct_sampling, int& tenths) const {
-    if (gain.automatic)
+    if (gain.automatic())
         return std::nullopt;
     const std::string tuner = tuner_name(info_.tuner);
     if (direct_sampling)
         return invalid("in direct sampling mode the tuner is not used, so module.gain has no effect; use gain = auto");
+    if (gain.mode == GainSetting::Mode::tuner)
+        return std::nullopt;
     if (info_.tuner == Tuner::fc2580 || info_.tuner == Tuner::unknown || gains_.empty())
         return invalid("the " + tuner + " tuner has no adjustable gain; use gain = auto");
     const auto [lo, hi] = std::minmax_element(gains_.begin(), gains_.end());
@@ -336,16 +338,25 @@ std::optional<Failure> Receiver::check_gain(const GainSetting& gain, bool direct
 
 std::optional<Failure> Receiver::set_gain(const GainSetting& gain) {
     int r;
-    if (gain.automatic) {
+    // A tuner without gain steps has only its own control to offer.
+    if (gain.mode == GainSetting::Mode::tuner || (gain.automatic() && gains_.empty())) {
         if ((r = device_->set_tuner_gain_mode(false)) != 0)
-            return usb_failure("switching the tuner to automatic gain", r);
+            return usb_failure("switching the tuner to its own gain control", r);
         manual_gain_ = false;
-        effective_.gain = GainSetting{true, 0};
+        effective_.gain = GainSetting::tuner_agc();
+        effective_.gain_now = 0;
         return std::nullopt;
     }
     int tenths = 0;
-    if (auto f = check_gain(gain, false, tenths))
-        return f;
+    if (gain.automatic()) {
+        // Where much RTL-SDR software starts: the control moves on from there.
+        gain_step_ = static_cast<size_t>(nearest_gain(gains_, 29.7));
+        tenths = gains_[gain_step_];
+    } else {
+        if (auto f = check_gain(gain, false, tenths))
+            return f;
+        gain_step_ = static_cast<size_t>(nearest_gain(gains_, tenths / 10.0));
+    }
     // Switching to manual resets the gain to its lowest step, so only do it
     // when coming from automatic.
     if (!manual_gain_) {
@@ -355,7 +366,19 @@ std::optional<Failure> Receiver::set_gain(const GainSetting& gain) {
     }
     if ((r = device_->set_tuner_gain(tenths)) != 0)
         return usb_failure("setting the tuner gain to " + db_text(tenths / 10.0) + " dB", r);
-    effective_.gain = GainSetting{false, tenths / 10.0};
+    effective_.gain = gain.automatic() ? GainSetting() : GainSetting::manual(tenths / 10.0);
+    effective_.gain_now = tenths / 10.0;
+    return std::nullopt;
+}
+
+std::optional<Failure> Receiver::set_gain_step(size_t index) {
+    if (!device_ || !effective_.gain.automatic() || !manual_gain_ || index >= gains_.size())
+        return Failure{ErrorCode::internal, "the gain step cannot be changed now"};
+    const int r = device_->set_tuner_gain(gains_[index]);
+    if (r != 0)
+        return usb_failure("setting the tuner gain to " + db_text(gains_[index] / 10.0) + " dB", r);
+    gain_step_ = index;
+    effective_.gain_now = gains_[index] / 10.0;
     return std::nullopt;
 }
 
@@ -523,7 +546,9 @@ std::optional<Failure> Receiver::configure(const OpenRequest& request) {
     effective_.buffers = s.buffers;
     log_line("tuned to %.2f Hz at %s samples/s, gain %s, direct sampling %s", effective_.tuned,
              json::serialize(json::Value(achieved)).c_str(),
-             effective_.gain.automatic ? "auto" : (db_text(effective_.gain.db) + " dB").c_str(),
+             effective_.gain.automatic()                         ? ("auto from " + db_text(effective_.gain_now) + " dB").c_str()
+             : effective_.gain.mode == GainSetting::Mode::tuner ? "the tuner's AGC"
+                                                                 : (db_text(effective_.gain.db) + " dB").c_str(),
              direct_sampling_name(effective_.direct_sampling));
     return std::nullopt;
 }
@@ -558,8 +583,10 @@ std::optional<Failure> Receiver::apply(const LiveChange& change) {
 namespace {
 
 json::Value gain_json(const GainSetting& g) {
-    if (g.automatic)
+    if (g.automatic())
         return json::Value("auto");
+    if (g.mode == GainSetting::Mode::tuner)
+        return json::Value("tuner");
     return json::Value(std::round(g.db * 10) / 10);
 }
 

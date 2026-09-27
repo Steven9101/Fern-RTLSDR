@@ -46,10 +46,11 @@ SYSTEM_LIBUSB_CFLAGS = $(patsubst -I%,-isystem %,$(shell pkg-config --cflags lib
 SYSTEM_LIBUSB_LIBS = $(shell pkg-config --libs libusb-1.0)
 
 MODULE_SRCS := src/json.cpp src/io.cpp src/log.cpp src/settings.cpp src/receiver.cpp src/stream.cpp \
-	src/session.cpp src/listing.cpp src/tuning.cpp
+	src/session.cpp src/listing.cpp src/tuning.cpp src/gain_control.cpp
 PROGRAM_SRCS := src/main.cpp src/rtlsdr_backend.cpp
 TEST_SRCS := tests/test_main.cpp tests/fake_backend.cpp tests/test_json.cpp tests/test_settings.cpp \
-	tests/test_receiver.cpp tests/test_stream.cpp tests/test_session.cpp tests/test_listing.cpp tests/test_tuning.cpp
+	tests/test_receiver.cpp tests/test_stream.cpp tests/test_session.cpp tests/test_listing.cpp tests/test_tuning.cpp \
+	tests/test_gain_control.cpp
 RTLSDR_SRCS := librtlsdr.c tuner_e4k.c tuner_fc0012.c tuner_fc0013.c tuner_fc2580.c tuner_r82xx.c
 LIBUSB_SRCS := core.c descriptor.c hotplug.c io.c sync.c strerror.c os/linux_usbfs.c os/linux_netlink.c \
 	os/events_posix.c os/threads_posix.c

@@ -32,8 +32,15 @@ struct DeviceSelector {
 };
 
 struct GainSetting {
-    bool automatic = true;
-    double db = 0;  // when not automatic
+    // automatic: the module's own control (gain_control.h); tuner: the
+    // tuner's AGC; manual: db.
+    enum class Mode { automatic, tuner, manual };
+    Mode mode = Mode::automatic;
+    double db = 0;  // when manual
+
+    static GainSetting manual(double gain_db) { return GainSetting{Mode::manual, gain_db}; }
+    static GainSetting tuner_agc() { return GainSetting{Mode::tuner, 0}; }
+    bool automatic() const { return mode == Mode::automatic; }
 };
 
 struct ModuleSettings {

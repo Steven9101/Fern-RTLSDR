@@ -34,6 +34,7 @@ struct Effective {
     uint32_t center = 0;  // as librtlsdr reports it: the frequency asked for
     double tuned = 0;     // the frequency at 0 Hz, as far as the module can tell
     GainSetting gain;
+    double gain_now = 0;  // dB, while the module sets the gain: the step in use
     int ppm = 0;
     bool rtl_agc = false;
     bool bias_tee = false;                   // as requested
@@ -80,6 +81,12 @@ public:
     std::optional<Failure> apply(const LiveChange& change);
 
     bool is_open() const { return device_ != nullptr; }
+
+    // The tuner's gain steps in tenths of a dB, ascending, and the one in
+    // use; set_gain_step() moves to another while gain = auto.
+    const std::vector<int>& gain_steps() const { return gains_; }
+    size_t gain_step() const { return gain_step_; }
+    std::optional<Failure> set_gain_step(size_t index);
     Device& device() { return *device_; }
     const DeviceInfo& info() const { return info_; }
     const Effective& effective() const { return effective_; }
@@ -108,6 +115,7 @@ private:
     std::optional<bool> bias_forced_;
     bool bias_on_by_module_ = false;
     bool manual_gain_ = false;
+    size_t gain_step_ = 0;
 
     std::optional<Failure> select(const DeviceSelector& selector, uint32_t& index);
     std::optional<Failure> configure(const OpenRequest& request);

@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "failure.h"
+#include "gain_control.h"
 #include "io.h"
 #include "json.h"
 #include "log.h"
@@ -60,6 +61,7 @@ private:
     SessionOptions options_;
     Receiver receiver_;
     std::unique_ptr<Stream> stream_;
+    std::optional<GainControl> gain_control_;
     LineReader lines_;
     int notify_fd_ = -1;
     State state_ = State::waiting;
@@ -84,6 +86,7 @@ private:
     void handle_open(const json::Value& message);
     void handle_set(const json::Value& message);
     void check_stream();
+    void start_gain_control();
     void on_tick();
     SessionResult shut_down();
 };
@@ -236,6 +239,23 @@ void Session::handle_open(const json::Value& message) {
     state_ = State::streaming;
     next_stats_ = Clock::now() + options_.stats_interval;
     next_drop_log_ = Clock::now();
+    start_gain_control();
+}
+
+// With gain = auto, from the step in use on; otherwise none.
+void Session::start_gain_control() {
+    gain_control_.reset();
+    const Effective& e = receiver_.effective();
+    if (!stream_ || !e.gain.automatic() || e.direct_sampling != DirectSampling::off || receiver_.gain_steps().empty())
+        return;
+    GainControlTiming timing = options_.gain_timing;
+    // Every transfer in flight when the gain changes still carries the old
+    // gain: that much time and a little, before the new one is judged.
+    const double transfer_seconds = transfer_bytes_for_rate(static_cast<uint32_t>(e.sample_rate)) / 2.0 / e.sample_rate;
+    const auto in_flight = std::chrono::milliseconds(static_cast<long long>(e.buffers * transfer_seconds * 1000) + 200);
+    timing.settle = std::max(timing.settle, in_flight);
+    gain_control_.emplace(receiver_.gain_steps(), receiver_.gain_step(), Clock::now(), stream_->bytes_received() / 2,
+                          stream_->samples_clipped(), timing);
 }
 
 void Session::handle_set(const json::Value& message) {
@@ -271,6 +291,8 @@ void Session::handle_set(const json::Value& message) {
         refuse(*f);
         return;
     }
+    if (change.gain)
+        start_gain_control();
     json::Value applied = json::Value::object();
     applied.set("type", "applied");
     if (id)
@@ -323,11 +345,26 @@ void Session::on_tick() {
         fail(Failure{ErrorCode::lost, text});
         return;
     }
+    if (gain_control_) {
+        const size_t before = gain_control_->step();
+        const size_t step =
+            gain_control_->update(now, stream_->bytes_received() / 2, stream_->samples_clipped(), stream_->take_peak());
+        if (step != before) {
+            if (auto f = receiver_.set_gain_step(step)) {
+                fail(*f);
+                return;
+            }
+            log_line("gain %s", gain_control_->reason().c_str());
+        }
+    }
     if (now >= next_stats_) {
         json::Value stats = json::Value::object();
         stats.set("type", "stats");
         stats.set("samples", stream_->samples_delivered());
         stats.set("dropped", stream_->samples_dropped());
+        stats.set("clipped", stream_->samples_clipped());
+        if (gain_control_)
+            stats.set("gain", receiver_.effective().gain_now);
         if (!send(stats))
             return;
         next_stats_ += options_.stats_interval;
