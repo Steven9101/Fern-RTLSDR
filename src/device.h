@@ -64,7 +64,9 @@ public:
     virtual std::vector<int> tuner_gains() = 0;  // tenths of a dB
     virtual int usb_strings(UsbStrings& out) = 0;
     virtual int read_eeprom(uint8_t* data, uint8_t offset, uint16_t len) = 0;  // < 0 on failure
-    virtual int xtal_freq(uint32_t& rtl_hz) = 0;
+    // The crystal frequencies librtlsdr computes with, the RTL2832U's and the
+    // tuner's, ppm correction applied.
+    virtual int xtal_freq(uint32_t& rtl_hz, uint32_t& tuner_hz) = 0;
     virtual int set_freq_correction(int ppm) = 0;  // -2 when unchanged
     virtual int set_direct_sampling(int mode) = 0;  // 0 off, 1 I branch, 2 Q branch
     virtual int direct_sampling() = 0;
@@ -80,6 +82,10 @@ public:
     virtual int set_agc_mode(bool on) = 0;
     virtual int set_bias_tee(bool on) = 0;
     virtual int reset_buffer() = 0;
+    // Writes the RTL2832U's 22-bit IF register, which librtlsdr sets only to
+    // the tuner's nominal IF: rtlsdr_set_if_freq() without its rounding
+    // down. See tuning.h.
+    virtual int set_if_register(uint32_t value) = 0;
     // Blocks, calling cb from the calling thread, until cancel_async() or
     // until the device fails.
     virtual int read_async(SampleCallback cb, void* ctx, uint32_t buf_num, uint32_t buf_len) = 0;

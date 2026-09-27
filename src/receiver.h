@@ -25,12 +25,14 @@ struct DeviceInfo {
     std::string serial;
     Tuner tuner = Tuner::unknown;
     bool blog_v4 = false;
+    bool blog_v4l = false;
 };
 
 // What the hardware was actually set to.
 struct Effective {
     double sample_rate = 0;
-    uint32_t center = 0;
+    uint32_t center = 0;  // as librtlsdr reports it: the frequency asked for
+    double tuned = 0;     // the frequency at 0 Hz, as far as the module can tell
     GainSetting gain;
     int ppm = 0;
     bool rtl_agc = false;

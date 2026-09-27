@@ -83,11 +83,20 @@ The `ready` message tells FernSDR what the hardware actually does:
 - `sample_rate` is the rate the RTL2832U resampler runs at, computed the way
   librtlsdr programs it. For 2400000 and 2048000 it is exact; for 1000000 it
   is 1000000.026 Hz.
-- `center` is the frequency librtlsdr reports after tuning, which is the
-  frequency requested. The hardware tunes in steps: the R820T and R828D PLL
-  lands up to about 1.4 kHz (typically 200 Hz) away, and the RTL2832U's
-  digital mixer up to 7 Hz. The module does not yet correct the samples for
-  this, so the band can sit that far from where FernSDR shows it.
+- `center` is where the dongle really tuned. librtlsdr sets the R820T and
+  R828D synthesizer with integer arithmetic, and it lands beside the
+  frequency asked for: at 2.4 Msps an RTL-SDR Blog V4 within 76 Hz on HF
+  (half the time within 11 Hz), within 340 Hz up to 250 MHz and within
+  1.3 kHz above (half the time 230 Hz), an R820T the same above 24 MHz. The
+  RTL2832U's mixer, set in 6.9 Hz steps, then adds up to 7 Hz. The module
+  repeats librtlsdr's arithmetic to know the synthesizer's frequency, and
+  sets the RTL2832U's mixer to put the frequency asked for at 0 Hz, which
+  leaves at most 3.4 Hz.
+  In direct sampling only the mixer's rounding is left to improve. For the
+  E4000, FC0012, FC0013 and FC2580 `center` is the frequency asked for, as
+  librtlsdr reports it. The arithmetic is checked in the tests against
+  librtlsdr's own tuner driver, run on a register file of its own, over
+  8,640 cases; it has not yet been measured on a dongle.
 - `settings.bandwidth` is the IF filter the tuner driver chose for the
   requested bandwidth, or for the sample rate when none was requested;
   0 in direct sampling.
@@ -111,15 +120,12 @@ exits with status 5, and FernSDR starts it again.
 The user FernSDR runs as needs read and write access to the dongle's USB
 device node, and the kernel's DVB driver must leave the dongle alone.
 
-On a FernSDR installed as a systemd service, one command does all of this:
-
-```sh
-sudo ./install.sh --service --usb     # in the FernSDR checkout
-```
-
-It writes the udev rule for the receiver's own group, blacklists the DVB-T
-driver and lets the service open USB devices and nothing else. The rest of
-this section is what it does, for a setup it does not cover.
+FernSDR's `install.sh`, which installs a release as a systemd service, sets
+all of this up: it writes the udev rule for the receiver's own group,
+blacklists the DVB-T driver and lets the service open USB devices and nothing
+else. For a FernSDR built from source and installed as a service,
+`sudo tools/source-install.sh --service --usb` in its checkout does the same.
+The rest of this section is what they do, for a setup neither covers.
 
 Allow the `plugdev` group to use RTL2832U dongles, in
 `/etc/udev/rules.d/60-fern-rtlsdr.rules`:
@@ -151,12 +157,13 @@ blacklist is the reliable way.
 
 ### FernSDR under systemd
 
-The unit that FernSDR's `install.sh` writes hides USB devices from the
-receiver (`PrivateDevices=yes`) and forbids the netlink socket that libusb
-uses to watch for USB devices (`RestrictAddressFamilies` without
-`AF_NETLINK`). A module started by FernSDR inherits both, and then reports
-exactly that in its error message. To let it reach the dongle, add a drop-in
-with `sudo systemctl edit fernsdr`:
+A unit that hides USB devices from the receiver (`PrivateDevices=yes`) or
+forbids the netlink socket libusb uses to watch for USB devices
+(`RestrictAddressFamilies` without `AF_NETLINK`), as the one
+`tools/source-install.sh --service` writes without `--usb` does, is
+inherited by a module FernSDR starts, which then reports exactly that in its
+error message. To let it reach the dongle, add a drop-in with
+`sudo systemctl edit fernsdr`:
 
 ```ini
 [Service]

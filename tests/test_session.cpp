@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fcntl.h>
 #include <mutex>
@@ -248,7 +249,9 @@ TEST(session_full_exchange) {
     CHECK_EQ(text_of(ready, "format"), std::string("u8"));
     CHECK_EQ(text_of(ready, "signal"), std::string("iq"));
     CHECK_EQ(ready.find("sample_rate")->as_number(), 2400000.0);
-    CHECK_EQ(ready.find("center")->as_number(), 100000000.0);
+    // Where the dongle really is: within half a step of the RTL2832U's IF
+    // oscillator of the frequency asked for (see tuning.h).
+    CHECK(std::fabs(ready.find("center")->as_number() - 100000000.0) <= 28800000.0 / 4194304 / 2);
     CHECK_EQ(fern::json::serialize(*ready.find("device")),
              std::string("{\"name\":\"Realtek RTL2838UHIDIR\",\"serial\":\"00000001\",\"tuner\":\"R820T\",\"index\":0}"));
     CHECK_EQ(text_of(*ready.find("settings"), "gain"), std::string("auto"));

@@ -46,10 +46,10 @@ SYSTEM_LIBUSB_CFLAGS = $(patsubst -I%,-isystem %,$(shell pkg-config --cflags lib
 SYSTEM_LIBUSB_LIBS = $(shell pkg-config --libs libusb-1.0)
 
 MODULE_SRCS := src/json.cpp src/io.cpp src/log.cpp src/settings.cpp src/receiver.cpp src/stream.cpp \
-	src/session.cpp src/listing.cpp
+	src/session.cpp src/listing.cpp src/tuning.cpp
 PROGRAM_SRCS := src/main.cpp src/rtlsdr_backend.cpp
 TEST_SRCS := tests/test_main.cpp tests/fake_backend.cpp tests/test_json.cpp tests/test_settings.cpp \
-	tests/test_receiver.cpp tests/test_stream.cpp tests/test_session.cpp tests/test_listing.cpp
+	tests/test_receiver.cpp tests/test_stream.cpp tests/test_session.cpp tests/test_listing.cpp tests/test_tuning.cpp
 RTLSDR_SRCS := librtlsdr.c tuner_e4k.c tuner_fc0012.c tuner_fc0013.c tuner_fc2580.c tuner_r82xx.c
 LIBUSB_SRCS := core.c descriptor.c hotplug.c io.c sync.c strerror.c os/linux_usbfs.c os/linux_netlink.c \
 	os/events_posix.c os/threads_posix.c
@@ -90,8 +90,10 @@ $(eval $(call compile_rules,$(ASAN_DIR),$(CC),$(CXX),$(SANITIZE),))
 NATIVE_OBJS := $(call cxx_objs,$(NATIVE_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(NATIVE_DIR))
 STATIC_OBJS := $(call cxx_objs,$(STATIC_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(STATIC_DIR)) \
 	$(call libusb_objs,$(STATIC_DIR))
-TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(MODULE_SRCS) $(TEST_SRCS))
-ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(MODULE_SRCS) $(TEST_SRCS))
+# The tests run the R820T/R828D driver itself against a register file of
+# their own; see tests/test_tuning.cpp.
+TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(TEST_DIR)/obj/rtlsdr/tuner_r82xx.o
+ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(ASAN_DIR)/obj/rtlsdr/tuner_r82xx.o
 
 PACKAGE := dist/rtlsdr-$(VERSION)-linux-$(ARCH).fernmod
 # The settings in every package come from --describe of a binary that runs

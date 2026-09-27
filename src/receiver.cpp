@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "log.h"
+#include "tuning.h"
 
 namespace fern {
 
@@ -269,9 +270,10 @@ std::optional<Failure> Receiver::open(const OpenRequest& request) {
                                             "describes, then unplug and replug the dongle"};
     case usb_error::access:
         return Failure{ErrorCode::usb, "no permission to open " + which +
-                                           ". Run FernSDR's install.sh --service --usb, which lets the receiver's "
-                                           "own user open RTL-SDR dongles, or see the udev rule in the README for a "
-                                           "receiver installed another way; then replug the dongle"};
+                                           ". FernSDR's install.sh lets the receiver's own user open RTL-SDR "
+                                           "dongles; for one built from source, run tools/source-install.sh "
+                                           "--service --usb in its checkout, or see the udev rule in the README. "
+                                           "Then replug the dongle"};
     case usb_error::no_device:
         return Failure{ErrorCode::no_device, which + " disappeared while it was being opened"};
     default:
@@ -298,6 +300,7 @@ std::optional<Failure> Receiver::open(const OpenRequest& request) {
         info_.name = "RTL2832U";
     info_.tuner = device_->tuner();
     info_.blog_v4 = strings.manufacturer == "RTLSDRBlog" && strings.product == "Blog V4";
+    info_.blog_v4l = strings.manufacturer == "RTLSDRBlog" && strings.product == "Blog V4L";
     gains_ = device_->tuner_gains();
     log_line("opened %s at index %u, serial %s, tuner %s", info_.name.c_str(), index,
              info_.serial.empty() ? "(none)" : info_.serial.c_str(), tuner_name(info_.tuner));
@@ -399,8 +402,10 @@ std::optional<Failure> Receiver::configure(const OpenRequest& request) {
     if (auto f = check_gain(s.gain, ds, tenths))
         return f;
 
+    // Read before the ppm correction applies: the nominal frequencies.
     uint32_t xtal = 0;
-    if (device_->xtal_freq(xtal) != 0 || xtal == 0)
+    uint32_t tuner_xtal = 0;
+    if (device_->xtal_freq(xtal, tuner_xtal) != 0 || xtal == 0)
         return Failure{ErrorCode::internal, "librtlsdr did not report its crystal frequency"};
     if (ds && request.center >= xtal)
         return invalid("direct sampling receives below " + std::to_string(xtal) + " Hz, and center is " +
@@ -467,6 +472,30 @@ std::optional<Failure> Receiver::configure(const OpenRequest& request) {
                        " Hz, so it would not really be tuned there" + range_hint(info_) +
                        ". Choose a center inside that range");
 
+    // Where librtlsdr's settings really put the band, corrected in the
+    // RTL2832U's mixer as far as its steps allow; see tuning.h. After every
+    // setting that retunes, since each sets the mixer back to the nominal IF.
+    const uint32_t filter_request = s.bandwidth != 0 ? s.bandwidth : device_->sample_rate();
+    effective_.tuned = request.center;
+    TuningInput tuning_input;
+    tuning_input.tuner = t;
+    tuning_input.upconverter = info_.blog_v4 || info_.blog_v4l;
+    tuning_input.v4l = info_.blog_v4l;
+    tuning_input.direct_sampling = ds;
+    tuning_input.center = request.center;
+    tuning_input.rtl_xtal = xtal;
+    tuning_input.tuner_xtal = tuner_xtal;
+    tuning_input.ppm = s.ppm;
+    tuning_input.filter_request = filter_request;
+    if (const auto tuning = tuning_for(tuning_input)) {
+        if ((r = device_->set_if_register(rtl_if_register(tuning->if_steps))) != 0)
+            return usb_failure("setting the RTL2832U's IF", r);
+        effective_.tuned = std::round(tuning->center * 100) / 100;
+        log_line("librtlsdr's settings tune %.1f Hz, %+.1f Hz from %u Hz; the RTL2832U's mixer corrects that to "
+                 "%.2f Hz",
+                 tuning->landed, tuning->landed - request.center, request.center, effective_.tuned);
+    }
+
     if (!ds) {
         if (auto f = set_gain(s.gain))
             return f;
@@ -488,12 +517,11 @@ std::optional<Failure> Receiver::configure(const OpenRequest& request) {
     effective_.offset_tuning = s.offset_tuning;
     // What librtlsdr last passed to the tuner's filter: offset tuning widens
     // it to cover the shifted band, otherwise the bandwidth or the rate.
-    uint32_t filter_request = s.bandwidth != 0 ? s.bandwidth : device_->sample_rate();
-    if (s.offset_tuning)
-        filter_request = 2 * (device_->sample_rate() / 2 * 170 / 100);
-    effective_.bandwidth = ds ? 0 : tuner_filter_bandwidth(t, filter_request);
+    effective_.bandwidth =
+        ds ? 0
+           : tuner_filter_bandwidth(t, s.offset_tuning ? 2 * (device_->sample_rate() / 2 * 170 / 100) : filter_request);
     effective_.buffers = s.buffers;
-    log_line("tuned to %u Hz at %s samples/s, gain %s, direct sampling %s", effective_.center,
+    log_line("tuned to %.2f Hz at %s samples/s, gain %s, direct sampling %s", effective_.tuned,
              json::serialize(json::Value(achieved)).c_str(),
              effective_.gain.automatic ? "auto" : (db_text(effective_.gain.db) + " dB").c_str(),
              direct_sampling_name(effective_.direct_sampling));

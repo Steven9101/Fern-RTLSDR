@@ -52,6 +52,7 @@ struct State {
     int direct_sampling_mode = 0;
     bool offset_tuning = false;
     uint32_t bandwidth = 0;
+    uint32_t if_register = 0;  // 0 until set_if_register()
     bool manual_gain = false;
     int gain = 0;
     bool agc = false;

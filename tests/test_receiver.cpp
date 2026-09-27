@@ -1,11 +1,13 @@
 // Fern-RTLSDR, an RTL-SDR input module for FernSDR.
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include <algorithm>
+#include <cmath>
 #include <string>
 
 #include "fake_backend.h"
 #include "receiver.h"
 #include "test.h"
+#include "tuning.h"
 
 using fern::DirectSampling;
 using fern::ErrorCode;
@@ -107,6 +109,41 @@ TEST(receiver_tunes_before_setting_the_rate) {
     CHECK(reset < calls.size());
     CHECK(!called(calls, "set_offset_tuning"));
     CHECK(!called(calls, "set_direct_sampling"));
+    // The IF that corrects the synthesizer comes after every setting that
+    // retunes, since each sets the nominal IF again.
+    const size_t if_register = position(calls, "set_if_register");
+    CHECK(bw < if_register);
+    CHECK(if_register < reset);
+}
+
+TEST(receiver_corrects_where_the_synthesizer_lands) {
+    fake::Backend backend({spec("A")});
+    fern::Receiver receiver(backend);
+    REQUIRE(!receiver.open(request(100000000, 2400000)));
+    // tuning.cpp's worked example: librtlsdr would put 24.41 Hz below
+    // 100 MHz at 0 Hz; four IF steps less put 3.05 Hz above.
+    CHECK_EQ(backend.last()->if_register, fern::rtl_if_register(264324));
+    const fern::Effective& e = receiver.effective();
+    CHECK_EQ(e.center, 100000000u);
+    CHECK(std::fabs(e.tuned - 100000003.05) < 0.005);
+}
+
+TEST(receiver_leaves_tuners_it_does_not_follow_alone) {
+    fake::Backend backend({spec("A", Tuner::e4000)});
+    fern::Receiver receiver(backend);
+    REQUIRE(!receiver.open(request(100000000, 2400000)));
+    CHECK(!called(backend.last()->calls, "set_if_register"));
+    CHECK_EQ(receiver.effective().tuned, 100000000.0);
+}
+
+TEST(receiver_rounds_the_direct_sampling_frequency) {
+    fake::Backend backend({spec("A")});
+    fern::Receiver receiver(backend);
+    fern::OpenRequest r = request(7100000);
+    r.settings.direct_sampling = DirectSampling::q;
+    REQUIRE(!receiver.open(r));
+    CHECK(called(backend.last()->calls, "set_if_register"));
+    CHECK(std::fabs(receiver.effective().tuned - 7100000) <= 28800000.0 / 4194304 / 2);
 }
 
 TEST(receiver_selects_by_serial_and_index) {

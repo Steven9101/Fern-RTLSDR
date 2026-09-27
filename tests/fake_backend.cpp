@@ -87,9 +87,14 @@ public:
         return 1;
     }
 
-    int xtal_freq(uint32_t& rtl_hz) override {
+    int xtal_freq(uint32_t& rtl_hz, uint32_t& tuner_hz) override {
         std::lock_guard<std::mutex> lock(state_->mutex);
-        rtl_hz = static_cast<uint32_t>(28800000 * (1.0 + state_->ppm / 1e6));
+        const double scale = 1.0 + state_->ppm / 1e6;
+        rtl_hz = static_cast<uint32_t>(28800000 * scale);
+        // librtlsdr gives an R828D a 16 MHz crystal, but for the RTL-SDR
+        // Blog V4's.
+        const bool v4 = spec_.manufacturer == "RTLSDRBlog" && spec_.product == "Blog V4";
+        tuner_hz = static_cast<uint32_t>((spec_.tuner == fern::Tuner::r828d && !v4 ? 16000000 : 28800000) * scale);
         return 0;
     }
 
@@ -219,6 +224,13 @@ public:
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->calls.push_back("reset_buffer");
         ++state_->reset_buffer_calls;
+        return 0;
+    }
+
+    int set_if_register(uint32_t value) override {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        state_->if_register = value;
+        state_->calls.push_back("set_if_register " + std::to_string(value));
         return 0;
     }
 

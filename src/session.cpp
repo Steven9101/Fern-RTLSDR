@@ -220,7 +220,7 @@ void Session::handle_open(const json::Value& message) {
     ready.set("format", "u8");
     ready.set("signal", "iq");
     ready.set("sample_rate", e.sample_rate);
-    ready.set("center", e.center);
+    ready.set("center", e.tuned);
     ready.set("device", receiver_.device_json());
     ready.set("settings", receiver_.settings_json());
     if (!send(ready))

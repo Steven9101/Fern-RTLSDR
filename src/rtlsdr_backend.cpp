@@ -18,10 +18,12 @@ extern "C" {
 #include <tuner_r82xx.h>
 
 // Exported by librtlsdr.c but not declared in rtl-sdr.h; the tuner drivers
-// talk to the tuner through them.
+// talk to the tuner through the first three, and librtlsdr to the RTL2832U's
+// registers through the last.
 void rtlsdr_set_i2c_repeater(rtlsdr_dev_t* dev, int on);
 int rtlsdr_i2c_write_fn(void* dev, uint8_t addr, uint8_t* buf, int len);
 int rtlsdr_i2c_read_fn(void* dev, uint8_t addr, uint8_t* buf, int len);
+int rtlsdr_demod_write_reg(rtlsdr_dev_t* dev, uint8_t page, uint16_t addr, uint16_t val, uint8_t len);
 }
 
 namespace fern {
@@ -77,7 +79,9 @@ public:
     int read_eeprom(uint8_t* data, uint8_t offset, uint16_t len) override {
         return rtlsdr_read_eeprom(dev_, data, offset, len);
     }
-    int xtal_freq(uint32_t& rtl_hz) override { return rtlsdr_get_xtal_freq(dev_, &rtl_hz, nullptr); }
+    int xtal_freq(uint32_t& rtl_hz, uint32_t& tuner_hz) override {
+        return rtlsdr_get_xtal_freq(dev_, &rtl_hz, &tuner_hz);
+    }
     int set_freq_correction(int ppm) override { return rtlsdr_set_freq_correction(dev_, ppm); }
     int set_direct_sampling(int mode) override { return rtlsdr_set_direct_sampling(dev_, mode); }
     int direct_sampling() override { return rtlsdr_get_direct_sampling(dev_); }
@@ -93,6 +97,13 @@ public:
     int set_agc_mode(bool on) override { return rtlsdr_set_agc_mode(dev_, on ? 1 : 0); }
     int set_bias_tee(bool on) override { return rtlsdr_set_bias_tee(dev_, on ? 1 : 0); }
     int reset_buffer() override { return rtlsdr_reset_buffer(dev_); }
+    int set_if_register(uint32_t value) override {
+        // The three writes rtlsdr_set_if_freq() makes.
+        int r = rtlsdr_demod_write_reg(dev_, 1, 0x19, (value >> 16) & 0x3f, 1);
+        r |= rtlsdr_demod_write_reg(dev_, 1, 0x1a, (value >> 8) & 0xff, 1);
+        r |= rtlsdr_demod_write_reg(dev_, 1, 0x1b, value & 0xff, 1);
+        return r;
+    }
 
     int read_async(SampleCallback cb, void* ctx, uint32_t buf_num, uint32_t buf_len) override {
         return rtlsdr_read_async(dev_, cb, ctx, buf_num, buf_len);
