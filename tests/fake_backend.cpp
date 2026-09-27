@@ -217,6 +217,8 @@ public:
     int set_bias_tee(bool on) override {
         std::lock_guard<std::mutex> lock(state_->mutex);
         state_->calls.push_back(std::string("set_bias_tee ") + (on ? "1" : "0"));
+        if (on && spec_.fail_bias_on)
+            return -1;
         state_->bias_tee = on || forced_bias_;
         return 0;
     }

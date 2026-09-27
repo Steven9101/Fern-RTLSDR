@@ -73,6 +73,9 @@ private:
     bool leaked_ = false;
     Clock::time_point next_stats_;
     Clock::time_point next_drop_log_;
+    Clock::time_point next_lowest_log_;
+    uint64_t stats_received_ = 0;
+    uint64_t stats_clipped_ = 0;
     uint64_t logged_drops_ = 0;
 
     void finish(int status) {
@@ -246,7 +249,8 @@ void Session::handle_open(const json::Value& message) {
 void Session::start_gain_control() {
     gain_control_.reset();
     const Effective& e = receiver_.effective();
-    if (!stream_ || !e.gain.automatic() || e.direct_sampling != DirectSampling::off || receiver_.gain_steps().empty())
+    if (!stream_ || !e.gain.automatic() || e.direct_sampling != DirectSampling::off ||
+        receiver_.gain_steps().size() < 2)
         return;
     GainControlTiming timing = options_.gain_timing;
     // Every transfer in flight when the gain changes still carries the old
@@ -287,12 +291,15 @@ void Session::handle_set(const json::Value& message) {
             refuse(*f);
             return;
         }
-    if (auto f = receiver_.apply(change)) {
-        refuse(*f);
-        return;
-    }
+    const auto failure = receiver_.apply(change);
+    // The gain is applied first, and stays as applied when a later setting
+    // fails: the control follows whatever it now is.
     if (change.gain)
         start_gain_control();
+    if (failure) {
+        refuse(*failure);
+        return;
+    }
     json::Value applied = json::Value::object();
     applied.set("type", "applied");
     if (id)
@@ -351,10 +358,23 @@ void Session::on_tick() {
             gain_control_->update(now, stream_->bytes_received() / 2, stream_->samples_clipped(), stream_->take_peak());
         if (step != before) {
             if (auto f = receiver_.set_gain_step(step)) {
-                fail(*f);
-                return;
+                // A dongle that no longer takes a gain has more wrong with
+                // it than the gain; anything else ends only the control.
+                if (f->code == ErrorCode::usb) {
+                    fail(*f);
+                    return;
+                }
+                log_line("the gain control stops: %s", f->message.c_str());
+                gain_control_.reset();
+            } else {
+                log_line("gain %s", gain_control_->reason().c_str());
             }
-            log_line("gain %s", gain_control_->reason().c_str());
+        }
+        if (gain_control_ && gain_control_->clipping_at_lowest() && now >= next_lowest_log_) {
+            log_line("the converter clips even at the tuner's lowest gain, %.1f dB: the signal is too strong for the "
+                     "dongle, and only an attenuator in front of it helps",
+                     gain_control_->gain_db());
+            next_lowest_log_ = now + std::chrono::minutes(10);
         }
     }
     if (now >= next_stats_) {
@@ -362,7 +382,16 @@ void Session::on_tick() {
         stats.set("type", "stats");
         stats.set("samples", stream_->samples_delivered());
         stats.set("dropped", stream_->samples_dropped());
-        stats.set("clipped", stream_->samples_clipped());
+        // The share of the samples that clipped since the last stats, of all
+        // that arrived: those still in the ring too.
+        const uint64_t received = stream_->bytes_received() / 2;
+        const uint64_t clipped = stream_->samples_clipped();
+        stats.set("clipping", received > stats_received_
+                                  ? static_cast<double>(clipped - stats_clipped_) /
+                                        static_cast<double>(received - stats_received_)
+                                  : 0.0);
+        stats_received_ = received;
+        stats_clipped_ = clipped;
         if (gain_control_)
             stats.set("gain", receiver_.effective().gain_now);
         if (!send(stats))

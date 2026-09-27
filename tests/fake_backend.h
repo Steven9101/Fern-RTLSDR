@@ -36,6 +36,7 @@ struct Spec {
     uint64_t stall_after = 0;     // bytes streamed before the device goes quiet; 0 never
     bool fail_start = false;      // read_async() returns at once without data
     int fail_gain = 0;            // what set_tuner_gain() returns
+    bool fail_bias_on = false;    // switching the bias tee on fails
     bool realtime = true;         // pace the samples at the sample rate
     // When above 0, the tone's amplitude follows the gain the tuner is set
     // to: this many steps from the midpoint at 0 dB (29.7 dB under the

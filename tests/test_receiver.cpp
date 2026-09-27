@@ -358,6 +358,10 @@ TEST(receiver_snaps_and_checks_gain) {
     REQUIRE(!receiver.set_gain_step(12));
     CHECK_EQ(st->gain, 207);
     CHECK_EQ(receiver.effective().gain_now, 20.7);
+    // Asked for auto again, it keeps the step the control found.
+    REQUIRE(!receiver.apply(c));
+    CHECK_EQ(receiver.gain_step(), 12u);
+    CHECK_EQ(st->gain, 207);
 
     // gain = tuner is the tuner's own AGC, as auto used to be.
     c.gain = fern::GainSetting::tuner_agc();
@@ -365,6 +369,16 @@ TEST(receiver_snaps_and_checks_gain) {
     CHECK(!st->manual_gain);
     CHECK_EQ(fern::json::serialize(receiver.settings_json(c)), std::string("{\"gain\":\"tuner\"}"));
     CHECK(receiver.set_gain_step(12));
+}
+
+TEST(receiver_leaves_a_tuner_without_gain_steps_to_its_own_control) {
+    // librtlsdr gives the FC2580's gains as the one entry 0.
+    fake::Spec s = spec("A", Tuner::fc2580);
+    fake::Backend backend({s});
+    fern::Receiver receiver(backend);
+    REQUIRE(!receiver.open(request(400000000)));
+    CHECK(!backend.last()->manual_gain);
+    CHECK_EQ(fern::json::serialize(receiver.settings_json()).find("\"gain\":\"tuner\"") != std::string::npos, true);
 }
 
 TEST(receiver_refuses_gain_that_cannot_work) {

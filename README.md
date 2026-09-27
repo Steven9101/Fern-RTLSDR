@@ -80,16 +80,21 @@ carries it too, and FernSDR checks a band's settings against it.
 
 With `gain = auto` the module sets the tuner's gain itself: the highest step
 that keeps the RTL2832U's 8-bit converter out of clipping with 6 dB to spare.
-It starts at 29.7 dB. When more than one sample in 10,000 clips it comes down
-a step at once, 6 dB when more than one in 100 does, and it goes up a step
-only once nothing has clipped for 5 seconds, in the first two minutes, or a
-minute after that, and the peaks would stay 6 dB under full scale one step
-higher. Clipped samples are lost to every listener, and a converter driven
-past its limit splatters over the whole band; a gain that stays well under
-the limit gives away sensitivity. `gain = tuner` leaves the gain to the
-tuner's own AGC, which watches the tuner's power detectors rather than the
-converter, and a number fixes the gain. FernSDR's S-meter calibration holds
-at the gain it was made at, so a calibrated band wants a fixed gain.
+It starts at 29.7 dB. When three tenths of a second of the last second each
+clipped more than one sample in 10,000, it comes down a step, and 6 dB when
+those clipped more than one in 100. It goes up a step once little more than
+the odd crash has clipped for 5 seconds, in the first two minutes, or a
+minute after that, and the peaks of all but the highest twentieth of those
+tenths would stay 6 dB under full scale one step higher. A crash of static
+or a spark that clips for a millisecond neither brings the gain down nor
+keeps it from going up: a gain lowered for it would cost the band its
+sensitivity for good. When even the lowest step clips, the module's log says
+that only an attenuator in front of the dongle helps.
+
+`gain = tuner` leaves the gain to the tuner's own AGC, which watches the
+tuner's power detectors rather than the converter, and a number fixes the
+gain. FernSDR's S-meter calibration holds at the gain it was made at, so a
+calibrated band wants a fixed gain.
 
 ### What the module reports
 
@@ -118,8 +123,8 @@ The `ready` message tells FernSDR what the hardware actually does:
 - `settings.gain` is `auto`, `tuner`, or the gain the tuner uses: a request
   is moved to the nearest step the tuner has, and `set` answers with the step
   it chose.
-- `stats` carry `clipped`, the samples whose I or Q sat at 0 or 255 since
-  `ready`, and with `gain = auto` the `gain` in use.
+- `stats` carry `clipping`, the share of the samples since the last stats
+  whose I or Q sat at 0 or 255, and with `gain = auto` the `gain` in use.
 - `settings.bias_tee_effective` says whether the bias tee is really on. The
   EEPROM of RTL-SDR Blog dongles can force it on whatever the setting says
   (`rtl_eeprom -b 0` clears that); the module reads the EEPROM and reports

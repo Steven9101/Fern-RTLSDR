@@ -338,8 +338,13 @@ std::optional<Failure> Receiver::check_gain(const GainSetting& gain, bool direct
 
 std::optional<Failure> Receiver::set_gain(const GainSetting& gain) {
     int r;
-    // A tuner without gain steps has only its own control to offer.
-    if (gain.mode == GainSetting::Mode::tuner || (gain.automatic() && gains_.empty())) {
+    // Already under the module's control: the step it has found stays.
+    if (gain.automatic() && effective_.gain.automatic() && manual_gain_)
+        return std::nullopt;
+    // A tuner without gain steps to choose from, such as the FC2580, whose
+    // table librtlsdr gives as the one entry 0, has only its own control to
+    // offer.
+    if (gain.mode == GainSetting::Mode::tuner || (gain.automatic() && gains_.size() < 2)) {
         if ((r = device_->set_tuner_gain_mode(false)) != 0)
             return usb_failure("switching the tuner to its own gain control", r);
         manual_gain_ = false;

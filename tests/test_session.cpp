@@ -323,27 +323,51 @@ TEST(session_brings_the_gain_down_when_the_converter_clips) {
     CHECK_EQ(text_of(*ready.find("settings"), "gain"), std::string("auto"));
     // 6 dB down at once, to 22.9 dB, where the tone peaks at 92 of 128.
     double gain = 0;
-    double clipped = 0;
+    double most_clipping = 0;
     const auto deadline = Clock::now() + std::chrono::seconds(5);
     while (gain != 22.9 && Clock::now() < deadline) {
         h.drain_samples(50);
         const Value stats = h.expect("stats");
-        REQUIRE(stats.find("clipped") && stats.find("gain"));
-        clipped = stats.find("clipped")->as_number();
+        REQUIRE(stats.find("clipping") && stats.find("gain"));
+        most_clipping = std::max(most_clipping, stats.find("clipping")->as_number());
         gain = stats.find("gain")->as_number();
     }
     CHECK_EQ(gain, 22.9);
-    CHECK(clipped > 0);
+    // At 29.7 dB the tone is past full scale more than half the time.
+    CHECK(most_clipping > 0.3);
     CHECK_EQ(backend.last()->gain, 229);
-    // And there it stays: at 25.4 dB the peaks would be 122 of 128.
+    // And there it stays: at 25.4 dB the peaks would be 122 of 128. Nothing
+    // clips now.
     h.drain_samples(1000);
-    CHECK_EQ(h.expect("stats").find("gain")->as_number(), 22.9);
+    const Value settled = h.expect("stats");
+    CHECK_EQ(settled.find("gain")->as_number(), 22.9);
+    CHECK_EQ(settled.find("clipping")->as_number(), 0.0);
     // Under the tuner's AGC the module leaves the gain alone and says none.
     h.send("{\"type\":\"set\",\"id\":1,\"settings\":{\"gain\":\"tuner\"}}");
     CHECK_EQ(fern::json::serialize(h.expect("applied")),
              std::string("{\"type\":\"applied\",\"id\":1,\"settings\":{\"gain\":\"tuner\"}}"));
     CHECK(!backend.last()->manual_gain);
     CHECK(!h.expect("stats").find("gain"));
+}
+
+TEST(session_keeps_the_gain_control_in_step_when_a_set_half_fails) {
+    fake::Spec spec;
+    spec.fail_bias_on = true;
+    fake::Backend backend({spec});
+    Harness h(backend);
+    check_hello(h);
+    h.send("{\"type\":\"open\",\"sample_rate\":2400000,\"center\":100000000,\"signal\":\"iq\","
+           "\"settings\":{\"gain\":38.6}}");
+    h.expect("ready");
+    CHECK(!h.expect("stats").find("gain"));
+    // The gain goes to auto, the bias tee then fails: the answer is an error,
+    // but the gain is auto now, and the control runs.
+    h.send("{\"type\":\"set\",\"id\":3,\"settings\":{\"gain\":\"auto\",\"bias_tee\":true}}");
+    CHECK_EQ(h.expect("error").find("id")->as_number(), 3.0);
+    h.drain_samples(100);
+    const Value stats = h.expect("stats");
+    REQUIRE(stats.find("gain"));
+    CHECK_EQ(stats.find("gain")->as_number(), 29.7);
 }
 
 TEST(session_works_with_nonblocking_fds) {
