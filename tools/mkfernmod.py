@@ -76,6 +76,8 @@ def main():
         "description": args.description,
         "settings": describe["settings"],
     }
+    if "tuning" in describe:
+        manifest["tuning"] = describe["tuning"]
     try:
         check_manifest(manifest)
     except Invalid as e:

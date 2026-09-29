@@ -413,6 +413,14 @@ json::Value describe_module() {
     d.set("version", module_version());
     d.set("kind", "input");
     d.set("settings", settings_schema());
+    // What the radio can be set to, for FernSDR's suggestions of bands.
+    // HF too: direct_sampling = auto takes it through the Q branch, or the
+    // Blog V4's upconverter. 2.4 Msps is the highest most computers sustain.
+    json::Value tuning = json::Value::object();
+    tuning.set("ranges", json::Value::array().push(json::Value::array().push(500000.0).push(1766000000.0)));
+    tuning.set("rates", json::Value::array().push(2400000.0).push(2048000.0).push(1024000.0));
+    tuning.set("signal", "iq");
+    d.set("tuning", tuning);
     return d;
 }
 

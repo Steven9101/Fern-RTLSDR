@@ -51,6 +51,7 @@ assert list(manifest)[:12] == ["schema", "id", "name", "version", "kind", "api",
 assert manifest["license"] == "GPL-2.0-or-later"
 describe = json.loads(subprocess.run([executable, "--describe"], stdout=subprocess.PIPE, check=True).stdout)
 assert manifest["settings"] == describe["settings"]
+assert manifest["tuning"] == describe["tuning"], "the package lost the tuning --describe declares"
 assert manifest == json.load(open(manifest_path))
 EOF
 then

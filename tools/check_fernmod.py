@@ -133,6 +133,26 @@ def check_manifest(manifest):
     if not isinstance(sha256, str) or not SHA256_PATTERN.match(sha256):
         raise Invalid("sha256 %r is not valid" % sha256)
     check_settings(manifest.get("settings"))
+    if "tuning" in manifest:
+        check_tuning(manifest["tuning"])
+
+
+def check_tuning(tuning):
+    """What FernSDR takes from the manifest's tuning: up to 8 frequency ranges
+    and 8 sample rates in whole Hz, and a signal of iq or real."""
+    def whole(value, most):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= most and value == int(value)
+    if not isinstance(tuning, dict) or tuning.get("signal") not in ("iq", "real"):
+        raise Invalid("tuning is not an object with a signal of iq or real")
+    ranges, rates = tuning.get("ranges"), tuning.get("rates")
+    if not isinstance(ranges, list) or not 1 <= len(ranges) <= 8 or not isinstance(rates, list) or not 1 <= len(rates) <= 8:
+        raise Invalid("tuning needs 1 to 8 ranges and 1 to 8 rates")
+    for r in ranges:
+        if not (isinstance(r, list) and len(r) == 2 and whole(r[0], 1e11) and whole(r[1], 1e11) and r[0] < r[1]):
+            raise Invalid("tuning range %r is not [low, high] in whole Hz" % (r,))
+    for rate in rates:
+        if not (whole(rate, 1e10) and rate >= 1000):
+            raise Invalid("tuning rate %r is not a whole number of Hz from 1000" % (rate,))
 
 
 def check(path, extract=None):
