@@ -404,8 +404,29 @@ std::optional<Failure> Receiver::set_bias(bool on) {
     return std::nullopt;
 }
 
+DirectSampling resolve_direct_sampling(const DeviceInfo& info, uint32_t center) {
+    // The Blog V4 and V4L tune HF through their own upconverter.
+    if (info.blog_v4 || info.blog_v4l) return DirectSampling::off;
+    // Where each tuner's own range starts; below it, only the Q branch
+    // receives. A tuner librtlsdr does not know can only direct-sample.
+    uint32_t lowest = 0;
+    switch (info.tuner) {
+    case Tuner::r820t:
+    case Tuner::r828d: lowest = 24000000; break;
+    case Tuner::e4000: lowest = 52000000; break;
+    case Tuner::fc0012:
+    case Tuner::fc0013:
+    case Tuner::fc2580: lowest = 22000000; break;
+    case Tuner::unknown: return DirectSampling::q;
+    }
+    return center < lowest ? DirectSampling::q : DirectSampling::off;
+}
+
 std::optional<Failure> Receiver::configure(const OpenRequest& request) {
-    const ModuleSettings& s = request.settings;
+    ModuleSettings settings = request.settings;
+    if (settings.direct_sampling == DirectSampling::automatic)
+        settings.direct_sampling = resolve_direct_sampling(info_, request.center);
+    const ModuleSettings& s = settings;
     const Tuner t = info_.tuner;
     const std::string tuner = tuner_name(t);
     const bool r82xx = t == Tuner::r820t || t == Tuner::r828d;

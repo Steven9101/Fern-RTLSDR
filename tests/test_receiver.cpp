@@ -240,7 +240,9 @@ TEST(receiver_reports_missing_busy_and_forbidden_devices) {
 
 TEST(receiver_refuses_hf_on_r820t_without_direct_sampling) {
     fake::Backend backend({spec("A")});
-    const std::string m = refused(backend, request(7100000), ErrorCode::invalid);
+    fern::OpenRequest off = request(7100000);
+    off.settings.direct_sampling = DirectSampling::off;
+    const std::string m = refused(backend, off, ErrorCode::invalid);
     CHECK_HAS(m, "cannot receive 7100000 Hz");
     CHECK_HAS(m, "module.direct_sampling = q");
     CHECK(backend.last()->closed);
@@ -252,6 +254,29 @@ TEST(receiver_refuses_hf_on_r820t_without_direct_sampling) {
     CHECK(receiver.effective().direct_sampling == DirectSampling::q);
     CHECK_EQ(backend.last()->direct_sampling, 2);
     CHECK_HAS(fern::json::serialize(receiver.settings_json()), "\"direct_sampling\":\"q\"");
+}
+
+TEST(receiver_direct_sampling_auto_does_what_the_dongle_needs) {
+    // The default: HF on an R820T through the Q branch, VHF through the
+    // tuner, and what came of it reported as q or off, never as auto.
+    for (const auto& [center, mode] : {std::pair<uint32_t, int>{7100000, 2}, {145000000, 0}}) {
+        fake::Backend backend({spec("A")});
+        fern::Receiver receiver(backend);
+        REQUIRE(!receiver.open(request(center)));
+        CHECK_EQ(static_cast<int>(receiver.effective().direct_sampling), mode);
+        CHECK_EQ(backend.last()->direct_sampling, mode);
+        CHECK(fern::json::serialize(receiver.settings_json()).find("\"direct_sampling\":\"auto\"") == std::string::npos);
+    }
+    fern::DeviceInfo v4;
+    v4.tuner = fern::Tuner::r828d;
+    v4.blog_v4 = true;
+    CHECK(fern::resolve_direct_sampling(v4, 7100000) == DirectSampling::off);
+    fern::DeviceInfo unknown;
+    CHECK(fern::resolve_direct_sampling(unknown, 145000000) == DirectSampling::q);
+    fern::DeviceInfo e4000;
+    e4000.tuner = fern::Tuner::e4000;
+    CHECK(fern::resolve_direct_sampling(e4000, 30000000) == DirectSampling::q);
+    CHECK(fern::resolve_direct_sampling(e4000, 60000000) == DirectSampling::off);
 }
 
 TEST(receiver_tunes_hf_on_blog_v4_without_direct_sampling) {

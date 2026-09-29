@@ -64,7 +64,7 @@ TEST(open_defaults) {
     CHECK_EQ(s.ppm, 0);
     CHECK(!s.rtl_agc);
     CHECK(!s.bias_tee);
-    CHECK(s.direct_sampling == fern::DirectSampling::off);
+    CHECK(s.direct_sampling == fern::DirectSampling::automatic);
     CHECK(!s.offset_tuning);
     CHECK_EQ(s.bandwidth, 0u);
     CHECK_EQ(s.buffers, 16u);
@@ -163,7 +163,7 @@ TEST(open_refuses_wrong_types_and_values) {
         CHECK_HAS(refusal(open_with("{\"" + k + "\":1}")), "module." + k);
         CHECK_HAS(refusal(open_with("{\"" + k + "\":null}")), "module." + k);
     }
-    CHECK_HAS(refusal(open_with("{\"direct_sampling\":\"Q\"}")), "module.direct_sampling must be off, i or q");
+    CHECK_HAS(refusal(open_with("{\"direct_sampling\":\"Q\"}")), "module.direct_sampling must be auto, off, i or q");
     CHECK_HAS(refusal(open_with("{\"direct_sampling\":false}")), "module.direct_sampling");
     CHECK_HAS(refusal(open_with("{\"direct_sampling\":2}")), "module.direct_sampling");
     CHECK(open_ok(open_with("{\"bandwidth\":8000000}")));

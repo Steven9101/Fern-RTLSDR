@@ -27,8 +27,11 @@ The module includes librtlsdr from the RTL-SDR Blog
 drives the RTL-SDR Blog V4 correctly: it switches the V4's inputs and uses its
 built-in upconverter below 28.8 MHz, so the V4 receives HF with
 `direct_sampling` off. On the RTL-SDR Blog V3, HF (below about 24 MHz) comes
-through the Q branch: set `module.direct_sampling = q`. Generic R820T dongles
-have nothing connected to the Q branch.
+through the Q branch. `direct_sampling = auto`, the default, does the right
+thing for either: off on a V4, and the Q branch on any other dongle for a
+band below where its tuner starts (24 MHz for the R820T). Generic R820T
+dongles have nothing connected to the Q branch, so HF needs a V3, a V4 or
+an upconverter there.
 
 Sample rates from 225001 to 300000 Hz and from 900001 to 3200000 Hz are
 possible. 2400000 is the highest rate that most computers sustain without
@@ -68,7 +71,7 @@ plugged in. With only one dongle, `module.device` can be left out.
 | `ppm` | number | 0 | no | crystal error in parts per million, -488 to 488 |
 | `rtl_agc` | boolean | no | yes | the RTL2832U's digital AGC |
 | `bias_tee` | boolean | no | yes | 4.5 V on the antenna input (RTL-SDR Blog V3 and V4) |
-| `direct_sampling` | choice | `off` | no | `off`, `i` or `q` |
+| `direct_sampling` | choice | `auto` | no | `auto`, `off`, `i` or `q` |
 | `offset_tuning` | boolean | no | no | E4000, FC0012, FC0013 and FC2580 only |
 | `bandwidth` | number | 0 | no | tuner IF filter in Hz, 0 to 8000000; 0 follows the sample rate. R820T, R828D and E4000 only; `ready` reports the filter the tuner chose |
 | `buffers` | number | 16 | no | USB transfers in flight, 2 to 64, each about 20 ms of samples |

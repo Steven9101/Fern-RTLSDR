@@ -21,7 +21,10 @@ constexpr const char* module_name = "RTL-SDR";
 constexpr int module_api = 1;
 const char* module_version();
 
-enum class DirectSampling { off = 0, i = 1, q = 2 };
+// `automatic` is what `auto` asks for and never reaches librtlsdr: it is
+// resolved to off or q when the band opens, where the tuner and the centre
+// are known (see resolve_direct_sampling).
+enum class DirectSampling { off = 0, i = 1, q = 2, automatic = 3 };
 const char* direct_sampling_name(DirectSampling mode);
 
 struct DeviceSelector {
@@ -49,7 +52,7 @@ struct ModuleSettings {
     int ppm = 0;
     bool rtl_agc = false;
     bool bias_tee = false;
-    DirectSampling direct_sampling = DirectSampling::off;
+    DirectSampling direct_sampling = DirectSampling::automatic;
     bool offset_tuning = false;
     uint32_t bandwidth = 0;  // Hz, 0 = automatic
     uint32_t buffers = 16;

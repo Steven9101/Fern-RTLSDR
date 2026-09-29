@@ -20,6 +20,7 @@ const char* direct_sampling_name(DirectSampling mode) {
     switch (mode) {
     case DirectSampling::i: return "i";
     case DirectSampling::q: return "q";
+    case DirectSampling::automatic: return "auto";
     case DirectSampling::off: break;
     }
     return "off";
@@ -186,14 +187,16 @@ std::optional<Failure> parse_value(const KeyInfo& k, const json::Value& v, Modul
     case Key::bias_tee:
         return parse_bool(k.name, v, s.bias_tee);
     case Key::direct_sampling:
-        if (v.is_string() && v.as_string() == "off")
+        if (v.is_string() && v.as_string() == "auto")
+            s.direct_sampling = DirectSampling::automatic;
+        else if (v.is_string() && v.as_string() == "off")
             s.direct_sampling = DirectSampling::off;
         else if (v.is_string() && v.as_string() == "i")
             s.direct_sampling = DirectSampling::i;
         else if (v.is_string() && v.as_string() == "q")
             s.direct_sampling = DirectSampling::q;
         else
-            return invalid("module.direct_sampling must be off, i or q, not " + shown(v));
+            return invalid("module.direct_sampling must be auto, off, i or q, not " + shown(v));
         return std::nullopt;
     case Key::offset_tuning:
         return parse_bool(k.name, v, s.offset_tuning);
@@ -358,12 +361,13 @@ json::Value settings_schema() {
         case Key::direct_sampling:
             s.set("type", "choice");
             s.set("label", "Direct sampling");
-            s.set("choices", json::Value::array().push("off").push("i").push("q"));
-            s.set("default", "off");
+            s.set("choices", json::Value::array().push("auto").push("off").push("i").push("q"));
+            s.set("default", "auto");
             s.set("help",
-                  "Samples the antenna input directly, for HF below 28.8 MHz: q for the HF input of "
-                  "the RTL-SDR Blog V3, i for dongles modified on the I branch. The RTL-SDR Blog V4 "
-                  "receives HF with this off.");
+                  "Samples the antenna input directly, for HF below 28.8 MHz. auto does what the "
+                  "dongle needs: off on the RTL-SDR Blog V4, which receives HF through its own "
+                  "upconverter, and q (the HF input of the Blog V3 and most dongles) for a band "
+                  "below where the tuner starts. i is for dongles modified on the I branch.");
             break;
         case Key::offset_tuning:
             s.set("type", "boolean");

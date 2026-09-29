@@ -28,6 +28,10 @@ struct DeviceInfo {
     bool blog_v4l = false;
 };
 
+// What `direct_sampling = auto` comes to for this dongle and centre: off,
+// or the Q branch for HF below where the tuner starts.
+DirectSampling resolve_direct_sampling(const DeviceInfo& info, uint32_t center);
+
 // What the hardware was actually set to.
 struct Effective {
     double sample_rate = 0;
