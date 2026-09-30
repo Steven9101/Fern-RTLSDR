@@ -459,6 +459,24 @@ std::optional<Failure> Receiver::configure(const OpenRequest& request) {
     if (ds && request.center >= xtal)
         return invalid("direct sampling receives below " + std::to_string(xtal) + " Hz, and center is " +
                        std::to_string(request.center) + " Hz; choose a lower center or switch direct sampling off");
+    // The FC2580 driver rounds what it is given to whole kilohertz, and
+    // librtlsdr still reports the request as tuned; the module does not follow
+    // that synthesizer, so it could neither correct nor report the difference.
+    // With offset tuning the tuner gets the center less rtlsdr_set_offset_tuning()'s
+    // offset, from the rate librtlsdr stores.
+    if (t == Tuner::fc2580 && !ds) {
+        const uint32_t rate = static_cast<uint32_t>(achieved_sample_rate(xtal, request.sample_rate));
+        const uint32_t offset = s.offset_tuning ? rate / 2 * 170 / 100 : 0;
+        const uint32_t remainder = (request.center - offset) % 1000;
+        if (remainder != 0)
+            return invalid("the FC2580 tuner tunes in whole kilohertz, so " + std::to_string(request.center) +
+                           " Hz would really be received " +
+                           std::to_string(remainder < 500 ? remainder : 1000 - remainder) +
+                           " Hz off; choose a center " + (offset ? "whose distance from the offset tuning "
+                                                                   "frequency is"
+                                                                 : "that is") +
+                           " a multiple of 1000 Hz");
+    }
 
     // rtlsdr_open() already applied this EEPROM flag; reading it here is the
     // only way to know whether the bias tee can be switched off.

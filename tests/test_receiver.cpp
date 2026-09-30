@@ -406,6 +406,25 @@ TEST(receiver_leaves_a_tuner_without_gain_steps_to_its_own_control) {
     CHECK_EQ(fern::json::serialize(receiver.settings_json()).find("\"gain\":\"tuner\"") != std::string::npos, true);
 }
 
+TEST(receiver_refuses_a_center_the_fc2580_would_round) {
+    // The FC2580 driver programs 438123000 Hz for 438123456 Hz, and librtlsdr
+    // still reports the request.
+    fake::Backend backend({spec("A", Tuner::fc2580)});
+    CHECK_HAS(refused(backend, request(438123456), ErrorCode::invalid), "456 Hz off");
+    {
+        fern::Receiver receiver(backend);
+        REQUIRE(!receiver.open(request(438123000)));
+        CHECK_EQ(receiver.effective().tuned, 438123000.0);
+    }
+    // With offset tuning the tuner gets the center less 2040000 Hz at 2.4 Msps.
+    fern::OpenRequest offset = request(438123000);
+    offset.settings.offset_tuning = true;
+    fern::Receiver shifted(backend);
+    REQUIRE(!shifted.open(offset));
+    offset.center = 438123500;
+    CHECK_HAS(refused(backend, offset, ErrorCode::invalid), "offset tuning");
+}
+
 TEST(receiver_refuses_gain_that_cannot_work) {
     fern::OpenRequest r = request(400000000);
     r.settings.gain = fern::GainSetting::manual(10);
