@@ -6,6 +6,7 @@
 #   make package [ARCH=...]     dist/rtlsdr-VERSION-linux-ARCH.fernmod
 #   make test                   unit, protocol, command line and package tests
 #   make test-asan              the unit, protocol and driver tests under ASan and UBSan
+#   make test-tsan              the driver tests under TSan
 #
 # ARCH is x86_64, aarch64 or armhf (ARMv7 with hardware floating point) and
 # defaults to the machine's own.
@@ -92,12 +93,17 @@ NATIVE_DIR := build/native
 STATIC_DIR := build/static-$(ARCH)
 TEST_DIR := build/test
 ASAN_DIR := build/asan
+TSAN_DIR := build/tsan
+# TSan needs the address space laid out without the randomisation newer
+# kernels apply.
+HOST_ARCH_UNAME := $(shell uname -m)
 SANITIZE := -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined
 
 $(eval $(call compile_rules,$(NATIVE_DIR),$(CC),$(CXX),,$$(SYSTEM_LIBUSB_CFLAGS)))
 $(eval $(call compile_rules,$(STATIC_DIR),$(CROSS)gcc,$(CROSS)g++,$(ARCH_FLAGS) -ffunction-sections -fdata-sections,$(VENDOR_LIBUSB_INCLUDE)))
 $(eval $(call compile_rules,$(TEST_DIR),$(CC),$(CXX),,$(VENDOR_LIBUSB_INCLUDE)))
 $(eval $(call compile_rules,$(ASAN_DIR),$(CC),$(CXX),$(SANITIZE),$(VENDOR_LIBUSB_INCLUDE)))
+$(eval $(call compile_rules,$(TSAN_DIR),$(CC),$(CXX),-fsanitize=thread,$(VENDOR_LIBUSB_INCLUDE)))
 
 NATIVE_OBJS := $(call cxx_objs,$(NATIVE_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(NATIVE_DIR)) \
 	$(NATIVE_DIR)/obj/gen/notices.o
@@ -110,13 +116,14 @@ TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(TEST_DIR
 ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(ASAN_DIR)/obj/rtlsdr/tuner_r82xx.o
 DRIVER_TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(DRIVER_TEST_SRCS)) $(call rtlsdr_objs,$(TEST_DIR))
 DRIVER_ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(DRIVER_TEST_SRCS)) $(call rtlsdr_objs,$(ASAN_DIR))
+DRIVER_TSAN_OBJS := $(call cxx_objs,$(TSAN_DIR),$(DRIVER_TEST_SRCS)) $(call rtlsdr_objs,$(TSAN_DIR))
 
 PACKAGE := dist/rtlsdr-$(VERSION)-linux-$(ARCH).fernmod
 # The settings in every package come from --describe of a binary that runs
 # here, built from the same sources, so all platforms carry the same list.
 DESCRIBE_BIN := build/static-$(HOST_ARCH)/fern-rtlsdr
 
-.PHONY: all static package test test-asan clean print-version check-libusb check-toolchain FORCE
+.PHONY: all static package test test-asan test-tsan clean print-version check-libusb check-toolchain FORCE
 
 all: build/fern-rtlsdr
 
@@ -174,6 +181,9 @@ $(TEST_DIR)/fern-rtlsdr-driver-tests: $(DRIVER_TEST_OBJS)
 $(ASAN_DIR)/fern-rtlsdr-driver-tests: $(DRIVER_ASAN_OBJS)
 	$(CXX) $(SANITIZE) -pthread -o $@ $^
 
+$(TSAN_DIR)/fern-rtlsdr-driver-tests: $(DRIVER_TSAN_OBJS)
+	$(CXX) -fsanitize=thread -pthread -o $@ $^
+
 test: $(TEST_DIR)/fern-rtlsdr-tests $(TEST_DIR)/fern-rtlsdr-driver-tests build/fern-rtlsdr
 	$(TEST_DIR)/fern-rtlsdr-tests
 	$(TEST_DIR)/fern-rtlsdr-driver-tests
@@ -183,6 +193,9 @@ test: $(TEST_DIR)/fern-rtlsdr-tests $(TEST_DIR)/fern-rtlsdr-driver-tests build/f
 test-asan: $(ASAN_DIR)/fern-rtlsdr-tests $(ASAN_DIR)/fern-rtlsdr-driver-tests
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 UBSAN_OPTIONS=print_stacktrace=1 $(ASAN_DIR)/fern-rtlsdr-tests
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 UBSAN_OPTIONS=print_stacktrace=1 $(ASAN_DIR)/fern-rtlsdr-driver-tests
+
+test-tsan: $(TSAN_DIR)/fern-rtlsdr-driver-tests
+	TSAN_OPTIONS=halt_on_error=1 setarch $(HOST_ARCH_UNAME) -R $(TSAN_DIR)/fern-rtlsdr-driver-tests
 
 print-version:
 	@echo $(VERSION)

@@ -42,6 +42,11 @@ and `tests/test_driver.cpp` runs the file against a fake libusb to check it.
 - `rtlsdr_read_async()` returns `-ENOMEM` when its transfers or buffers
   cannot be allocated, after freeing what was, where upstream goes on to
   fill and submit NULL transfers.
+- `rtlsdr_read_async()` and `rtlsdr_cancel_async()` share the streaming
+  state through atomic operations, and cancelling wakes the event loop with
+  `libusb_interrupt_event_handler()` instead of a completion flag that
+  libusb reads without synchronisation. Upstream races there when, as in
+  this module, another thread cancels; `make test-tsan` shows it.
 
 ## libusb
 

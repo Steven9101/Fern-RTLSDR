@@ -3,8 +3,11 @@
 //
 // librtlsdr.c itself, run against the libusb of fake_libusb.cpp: the paths
 // inside the driver that the module's fake Device cannot reach.
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <fcntl.h>
+#include <thread>
 #include <unistd.h>
 
 #include <libusb.h>
@@ -170,5 +173,43 @@ TEST(driver_reports_transfers_it_could_not_allocate) {
     }
     CHECK_EQ(r, 0);
     CHECK(reading.callbacks >= 10);
+    close_device(dev);
+}
+
+namespace {
+
+void count(unsigned char*, uint32_t, void* ctx) { static_cast<std::atomic<int>*>(ctx)->fetch_add(1); }
+
+}  // namespace
+
+// The module cancels from its session thread while the reader thread runs
+// the event loop, as Stream::request_stop() does. make test-tsan runs this
+// under ThreadSanitizer, which sees any unsynchronised access to the state
+// the two threads share.
+TEST(driver_cancels_streaming_from_another_thread) {
+    fake_usb::reset();
+    rtlsdr_dev_t* dev = open_device();
+    REQUIRE(dev);
+    for (int round = 0; round < 20; ++round) {
+        std::atomic<int> callbacks{0};
+        std::atomic<bool> ended{false};
+        int r = -100;
+        std::thread reader([&] {
+            r = rtlsdr_read_async(dev, count, &callbacks, 4, 16384);
+            ended = true;
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (callbacks.load() < 8 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        CHECK(callbacks.load() >= 8);
+        // Repeated, as Stream::wait() repeats it, until the reader has ended.
+        while (!ended.load() && std::chrono::steady_clock::now() < deadline) {
+            rtlsdr_cancel_async(dev);
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+        REQUIRE(ended.load());
+        reader.join();
+        CHECK_EQ(r, 0);
+    }
     close_device(dev);
 }

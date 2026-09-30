@@ -95,6 +95,9 @@ struct rtlsdr_dev {
 	unsigned char **xfer_buf;
 	rtlsdr_read_async_cb_t cb;
 	void *cb_ctx;
+	/* Fern-RTLSDR: rtlsdr_cancel_async() may run in another thread than
+	 * rtlsdr_read_async(), so async_status is only accessed through
+	 * async_status_get() and async_status_set(); async_cancel is unused. */
 	enum rtlsdr_async_status async_status;
 	int async_cancel;
 	int use_zerocopy;
@@ -127,6 +130,16 @@ struct rtlsdr_dev {
 
 int rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val);
 static int rtlsdr_set_if_freq(rtlsdr_dev_t *dev, uint32_t freq);
+
+static enum rtlsdr_async_status async_status_get(rtlsdr_dev_t *dev)
+{
+	return __atomic_load_n(&dev->async_status, __ATOMIC_ACQUIRE);
+}
+
+static void async_status_set(rtlsdr_dev_t *dev, enum rtlsdr_async_status s)
+{
+	__atomic_store_n(&dev->async_status, s, __ATOMIC_RELEASE);
+}
 
 /* generic tuner interface functions, shall be moved to the tuner implementations */
 int e4000_init(void *dev) {
@@ -1735,7 +1748,7 @@ int rtlsdr_close(rtlsdr_dev_t *dev)
 
 	if(!dev->dev_lost) {
 		/* block until all async operations have been completed (if any) */
-		while (RTLSDR_INACTIVE != dev->async_status) {
+		while (RTLSDR_INACTIVE != async_status_get(dev)) {
 #ifdef _WIN32
 			Sleep(1);
 #else
@@ -1957,11 +1970,10 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 	if (!dev)
 		return -1;
 
-	if (RTLSDR_INACTIVE != dev->async_status)
+	if (RTLSDR_INACTIVE != async_status_get(dev))
 		return -2;
 
-	dev->async_status = RTLSDR_RUNNING;
-	dev->async_cancel = 0;
+	async_status_set(dev, RTLSDR_RUNNING);
 
 	dev->cb = cb;
 	dev->cb_ctx = ctx;
@@ -1981,7 +1993,7 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 	if (r < 0) {
 		fprintf(stderr, "Failed to allocate the transfer buffers\n");
 		_rtlsdr_free_async_buffers(dev);
-		dev->async_status = RTLSDR_INACTIVE;
+		async_status_set(dev, RTLSDR_INACTIVE);
 		return r;
 	}
 
@@ -2003,14 +2015,16 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 					"following command:\n"
 					"echo 0 > /sys/module/usbcore"
 					"/parameters/usbfs_memory_mb\n", i);
-			dev->async_status = RTLSDR_CANCELING;
+			async_status_set(dev, RTLSDR_CANCELING);
 			break;
 		}
 	}
 
-	while (RTLSDR_INACTIVE != dev->async_status) {
-		r = libusb_handle_events_timeout_completed(dev->ctx, &tv,
-							   &dev->async_cancel);
+	/* Fern-RTLSDR: no completion flag, which libusb would read without
+	 * a lock the cancelling thread holds; rtlsdr_cancel_async() wakes this
+	 * loop with libusb_interrupt_event_handler() instead. */
+	while (RTLSDR_INACTIVE != async_status_get(dev)) {
+		r = libusb_handle_events_timeout_completed(dev->ctx, &tv, NULL);
 		if (r < 0) {
 			/*fprintf(stderr, "handle_events returned: %d\n", r);*/
 			if (r == LIBUSB_ERROR_INTERRUPTED) /* stray signal */
@@ -2018,7 +2032,7 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 			break;
 		}
 
-		if (RTLSDR_CANCELING == dev->async_status) {
+		if (RTLSDR_CANCELING == async_status_get(dev)) {
 			next_status = RTLSDR_INACTIVE;
 
 			if (!dev->xfer)
@@ -2059,7 +2073,7 @@ int rtlsdr_read_async(rtlsdr_dev_t *dev, rtlsdr_read_async_cb_t cb, void *ctx,
 
 	_rtlsdr_free_async_buffers(dev);
 
-	dev->async_status = next_status;
+	async_status_set(dev, next_status);
 
 	return r;
 }
@@ -2070,9 +2084,13 @@ int rtlsdr_cancel_async(rtlsdr_dev_t *dev)
 		return -1;
 
 	/* if streaming, try to cancel gracefully */
-	if (RTLSDR_RUNNING == dev->async_status) {
-		dev->async_status = RTLSDR_CANCELING;
-		dev->async_cancel = 1;
+	/* Fern-RTLSDR: atomically, and wake the event loop, which no
+	 * longer watches a completion flag */
+	enum rtlsdr_async_status running = RTLSDR_RUNNING;
+	if (__atomic_compare_exchange_n(&dev->async_status, &running,
+					RTLSDR_CANCELING, 0, __ATOMIC_ACQ_REL,
+					__ATOMIC_ACQUIRE)) {
+		libusb_interrupt_event_handler(dev->ctx);
 		return 0;
 	}
 

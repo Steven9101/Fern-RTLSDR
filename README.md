@@ -223,8 +223,9 @@ make static                   # build/static-x86_64/fern-rtlsdr, fully static
 make static ARCH=aarch64      # cross build, needs aarch64-linux-gnu-gcc and g++
 make static ARCH=armhf        # cross build, needs arm-linux-gnueabihf-gcc and g++
 make package ARCH=aarch64     # dist/rtlsdr-0.1.0-linux-aarch64.fernmod
-make test                     # unit, protocol, command line and package tests
-make test-asan                # the unit and protocol tests under ASan and UBSan
+make test                     # unit, protocol, driver, command line and package tests
+make test-asan                # the unit, protocol and driver tests under ASan and UBSan
+make test-tsan                # the driver tests under TSan
 ```
 
 `make` needs the libusb development files (`apt install libusb-1.0-0-dev
@@ -241,7 +242,8 @@ A 64-bit operating system on a Pi 3, 4 or 5 uses the `aarch64` package.
 
 The tests need no dongle. A fake device that streams a known tone drives the
 same code as the real one through real pipes, and can simulate a busy, an
-unplugged and a stalled dongle.
+unplugged and a stalled dongle. The driver tests run the vendored librtlsdr
+itself against a fake libusb, for the failures that happen inside it.
 
 ## Releases
 
