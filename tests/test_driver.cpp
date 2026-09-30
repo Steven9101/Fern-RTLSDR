@@ -128,3 +128,47 @@ TEST(driver_reports_a_bias_tee_switch_that_failed) {
     CHECK(!bias_tee_on());
     close_device(dev);
 }
+
+namespace {
+
+struct Reading {
+    rtlsdr_dev_t* dev = nullptr;
+    int callbacks = 0;
+    int stop_after = 0;
+};
+
+void count_and_stop(unsigned char*, uint32_t, void* ctx) {
+    Reading* reading = static_cast<Reading*>(ctx);
+    if (++reading->callbacks == reading->stop_after)
+        rtlsdr_cancel_async(reading->dev);
+}
+
+}  // namespace
+
+TEST(driver_reports_transfers_it_could_not_allocate) {
+    fake_usb::reset();
+    rtlsdr_dev_t* dev = open_device();
+    REQUIRE(dev);
+    Reading reading;
+    reading.dev = dev;
+    reading.stop_after = 10;
+    // The third of four transfers cannot be allocated: read_async() must
+    // fail without submitting anything, rather than fill a NULL transfer.
+    fake_usb::fail_alloc_transfer_from = 2;
+    int r;
+    {
+        QuietStderr quiet;
+        r = rtlsdr_read_async(dev, count_and_stop, &reading, 4, 16384);
+    }
+    CHECK(r < 0);
+    CHECK_EQ(reading.callbacks, 0);
+    // And leave the device able to stream once memory is there again.
+    fake_usb::fail_alloc_transfer_from = -1;
+    {
+        QuietStderr quiet;
+        r = rtlsdr_read_async(dev, count_and_stop, &reading, 4, 16384);
+    }
+    CHECK_EQ(r, 0);
+    CHECK(reading.callbacks >= 10);
+    close_device(dev);
+}

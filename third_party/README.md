@@ -39,6 +39,9 @@ and `tests/test_driver.cpp` runs the file against a fake libusb to check it.
   read or written, where upstream always returns 0, and writes nothing after
   a failed read. The RTL-SDR Blog V4's input switch, which uses the same
   function, then fails the tune instead of passing unnoticed.
+- `rtlsdr_read_async()` returns `-ENOMEM` when its transfers or buffers
+  cannot be allocated, after freeing what was, where upstream goes on to
+  fill and submit NULL transfers.
 
 ## libusb
 
