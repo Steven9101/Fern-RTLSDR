@@ -5,7 +5,7 @@
 #   make static [ARCH=...]      build/static-ARCH/fern-rtlsdr, fully static
 #   make package [ARCH=...]     dist/rtlsdr-VERSION-linux-ARCH.fernmod
 #   make test                   unit, protocol, command line and package tests
-#   make test-asan              the unit and protocol tests under ASan and UBSan
+#   make test-asan              the unit, protocol and driver tests under ASan and UBSan
 #
 # ARCH is x86_64, aarch64 or armhf (ARMv7 with hardware floating point) and
 # defaults to the machine's own.
@@ -51,6 +51,9 @@ PROGRAM_SRCS := src/main.cpp src/rtlsdr_backend.cpp
 TEST_SRCS := tests/test_main.cpp tests/fake_backend.cpp tests/test_json.cpp tests/test_settings.cpp \
 	tests/test_receiver.cpp tests/test_stream.cpp tests/test_session.cpp tests/test_listing.cpp tests/test_tuning.cpp \
 	tests/test_gain_control.cpp
+# librtlsdr.c itself against a fake libusb, in a program of its own: the
+# tuning tests stand in for parts of librtlsdr.c.
+DRIVER_TEST_SRCS := tests/test_main.cpp tests/test_driver.cpp tests/fake_libusb.cpp src/log.cpp
 RTLSDR_SRCS := librtlsdr.c tuner_e4k.c tuner_fc0012.c tuner_fc0013.c tuner_fc2580.c tuner_r82xx.c
 LIBUSB_SRCS := core.c descriptor.c hotplug.c io.c sync.c strerror.c os/linux_usbfs.c os/linux_netlink.c \
 	os/events_posix.c os/threads_posix.c
@@ -73,7 +76,7 @@ $(1)/obj/src/%.o: src/%.cpp
 	$(3) $$(CXXFLAGS_BASE) $(4) $$(RTLSDR_INCLUDE) $(5) -MMD -MP -c $$< -o $$@
 $(1)/obj/tests/%.o: tests/%.cpp
 	@mkdir -p $$(@D)
-	$(3) $$(CXXFLAGS_BASE) $(4) -Isrc -MMD -MP -c $$< -o $$@
+	$(3) $$(CXXFLAGS_BASE) $(4) -Isrc $$(RTLSDR_INCLUDE) $(5) -MMD -MP -c $$< -o $$@
 $(1)/obj/gen/notices.o: $(NOTICES_SRC)
 	@mkdir -p $$(@D)
 	$(3) $$(CXXFLAGS_BASE) $(4) -c $$< -o $$@
@@ -93,8 +96,8 @@ SANITIZE := -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-r
 
 $(eval $(call compile_rules,$(NATIVE_DIR),$(CC),$(CXX),,$$(SYSTEM_LIBUSB_CFLAGS)))
 $(eval $(call compile_rules,$(STATIC_DIR),$(CROSS)gcc,$(CROSS)g++,$(ARCH_FLAGS) -ffunction-sections -fdata-sections,$(VENDOR_LIBUSB_INCLUDE)))
-$(eval $(call compile_rules,$(TEST_DIR),$(CC),$(CXX),,))
-$(eval $(call compile_rules,$(ASAN_DIR),$(CC),$(CXX),$(SANITIZE),))
+$(eval $(call compile_rules,$(TEST_DIR),$(CC),$(CXX),,$(VENDOR_LIBUSB_INCLUDE)))
+$(eval $(call compile_rules,$(ASAN_DIR),$(CC),$(CXX),$(SANITIZE),$(VENDOR_LIBUSB_INCLUDE)))
 
 NATIVE_OBJS := $(call cxx_objs,$(NATIVE_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(NATIVE_DIR)) \
 	$(NATIVE_DIR)/obj/gen/notices.o
@@ -105,6 +108,8 @@ STATIC_OBJS := $(call cxx_objs,$(STATIC_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(c
 # their own; see tests/test_tuning.cpp.
 TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(TEST_DIR)/obj/rtlsdr/tuner_r82xx.o
 ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(MODULE_SRCS) $(TEST_SRCS)) $(ASAN_DIR)/obj/rtlsdr/tuner_r82xx.o
+DRIVER_TEST_OBJS := $(call cxx_objs,$(TEST_DIR),$(DRIVER_TEST_SRCS)) $(call rtlsdr_objs,$(TEST_DIR))
+DRIVER_ASAN_OBJS := $(call cxx_objs,$(ASAN_DIR),$(DRIVER_TEST_SRCS)) $(call rtlsdr_objs,$(ASAN_DIR))
 
 PACKAGE := dist/rtlsdr-$(VERSION)-linux-$(ARCH).fernmod
 # The settings in every package come from --describe of a binary that runs
@@ -163,13 +168,21 @@ $(TEST_DIR)/fern-rtlsdr-tests: $(TEST_OBJS)
 $(ASAN_DIR)/fern-rtlsdr-tests: $(ASAN_OBJS)
 	$(CXX) $(SANITIZE) -pthread -o $@ $^
 
-test: $(TEST_DIR)/fern-rtlsdr-tests build/fern-rtlsdr
+$(TEST_DIR)/fern-rtlsdr-driver-tests: $(DRIVER_TEST_OBJS)
+	$(CXX) -pthread -o $@ $^
+
+$(ASAN_DIR)/fern-rtlsdr-driver-tests: $(DRIVER_ASAN_OBJS)
+	$(CXX) $(SANITIZE) -pthread -o $@ $^
+
+test: $(TEST_DIR)/fern-rtlsdr-tests $(TEST_DIR)/fern-rtlsdr-driver-tests build/fern-rtlsdr
 	$(TEST_DIR)/fern-rtlsdr-tests
+	$(TEST_DIR)/fern-rtlsdr-driver-tests
 	sh tests/cli_test.sh build/fern-rtlsdr
 	sh tests/package_test.sh build/fern-rtlsdr
 
-test-asan: $(ASAN_DIR)/fern-rtlsdr-tests
+test-asan: $(ASAN_DIR)/fern-rtlsdr-tests $(ASAN_DIR)/fern-rtlsdr-driver-tests
 	ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 UBSAN_OPTIONS=print_stacktrace=1 $(ASAN_DIR)/fern-rtlsdr-tests
+	ASAN_OPTIONS=detect_leaks=1:abort_on_error=0 UBSAN_OPTIONS=print_stacktrace=1 $(ASAN_DIR)/fern-rtlsdr-driver-tests
 
 print-version:
 	@echo $(VERSION)

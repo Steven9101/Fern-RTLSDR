@@ -870,14 +870,15 @@ int rtlsdr_read_eeprom(rtlsdr_dev_t *dev, uint8_t *data, uint8_t offset, uint16_
 	if ((len + offset) > 256)
 		return -2;
 
+	/* Fern-RTLSDR: a short transfer is a failure too, not a byte read */
 	r = rtlsdr_write_array(dev, IICB, EEPROM_ADDR, &offset, 1);
-	if (r < 0)
+	if (r != 1)
 		return -3;
 
 	for (i = 0; i < len; i++) {
 		r = rtlsdr_read_array(dev, IICB, EEPROM_ADDR, data + i, 1);
 
-		if (r < 0)
+		if (r != 1)
 			return -3;
 	}
 
@@ -1692,8 +1693,10 @@ found:
 	/* Hack to force the Bias T to always be on if we set the IR-Endpoint
 	* bit in the EEPROM to 0. Default on EEPROM is 1.
 	*/
+	/* Fern-RTLSDR: an EEPROM that cannot be read forces nothing; buf
+	 * holds no EEPROM contents then. */
 	r = rtlsdr_read_eeprom(dev, buf, 0, EEPROM_SIZE);
-	dev->force_bt = (buf[7] & 0x02) ? 0 : 1;
+	dev->force_bt = (r >= 0 && !(buf[7] & 0x02)) ? 1 : 0;
 	if(dev->force_bt)
 		rtlsdr_set_bias_tee(dev, 1);
 

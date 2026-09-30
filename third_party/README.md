@@ -1,7 +1,8 @@
 # Third-party code
 
-Both libraries are copied unmodified from their upstream repositories, with
-only the files the build compiles and their licenses. The Makefile compiles
+Both libraries are copied from their upstream repositories, with only the
+files the build compiles and their licenses. libusb is unmodified; the
+changes to librtlsdr are listed below. The Makefile compiles
 them directly; their own build systems are not used.
 
 ## rtl-sdr-blog (librtlsdr)
@@ -25,6 +26,16 @@ declaring them in `rtl-sdr.h`: `rtlsdr_set_i2c_repeater`,
 R820T/R828D PLL lock flag, which librtlsdr does not report
 (`src/rtlsdr_backend.cpp`).
 
+### Changes to librtlsdr
+
+Each is marked with a comment starting `Fern-RTLSDR:` in `src/librtlsdr.c`,
+and `tests/test_driver.cpp` runs the file against a fake libusb to check it.
+
+- `rtlsdr_read_eeprom()` treats a short transfer as a failure, and
+  `rtlsdr_open()` forces the bias tee on only when the EEPROM was read and
+  asks for that. Upstream decides from an uninitialised buffer when the
+  EEPROM does not answer.
+
 ## libusb
 
 - Upstream: https://github.com/libusb/libusb
@@ -46,7 +57,8 @@ script generates; it defines what configure would define on glibc Linux with
 ## Updating
 
 Clone the new tag with `git clone --depth 1 --branch <tag> <url>`, copy the
-same files over the ones here, update the commit hashes above and the
+same files over the ones here, carry the changes listed above over to the
+new `librtlsdr.c`, update the commit hashes above and the
 librtlsdr and libusb versions in the start-up log line and in `notices()` in
 `src/main.cpp`, and run
 `make test`, `make static` and `make static ARCH=aarch64`. For librtlsdr, also
