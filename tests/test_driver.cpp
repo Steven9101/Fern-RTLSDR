@@ -59,6 +59,11 @@ void close_device(rtlsdr_dev_t* dev) {
     rtlsdr_close(dev);
 }
 
+int switch_quietly(rtlsdr_dev_t* dev, int on) {
+    QuietStderr quiet;
+    return rtlsdr_set_bias_tee(dev, on);
+}
+
 bool bias_tee_on() { return (fake_usb::reg(fake_usb::sys_block, fake_usb::gpo) & 0x01) != 0; }
 
 bool is_eeprom_read(const fake_usb::Control& c) {
@@ -96,5 +101,30 @@ TEST(driver_forces_the_bias_tee_only_as_a_readable_eeprom_says) {
     CHECK(!bias_tee_on());
     uint8_t eeprom[8] = {};
     CHECK(rtlsdr_read_eeprom(dev, eeprom, 0, sizeof eeprom) < 0);
+    close_device(dev);
+}
+
+TEST(driver_reports_a_bias_tee_switch_that_failed) {
+    fake_usb::reset();
+    rtlsdr_dev_t* dev = open_device();
+    REQUIRE(dev);
+    REQUIRE(rtlsdr_set_bias_tee(dev, 1) == 0);
+    REQUIRE(bias_tee_on());
+    // The output register stops answering: switching off must not report
+    // success while the antenna stays powered.
+    fake_usb::control_hook = [](const fake_usb::Control& c) {
+        return c.block == fake_usb::sys_block && c.address == fake_usb::gpo ? LIBUSB_ERROR_TIMEOUT : 1;
+    };
+    CHECK(switch_quietly(dev, 0) != 0);
+    CHECK(bias_tee_on());
+    // So must a failed write alone, after a read that worked.
+    fake_usb::control_hook = [](const fake_usb::Control& c) {
+        return !c.in && c.block == fake_usb::sys_block && c.address == fake_usb::gpo ? LIBUSB_ERROR_IO : 1;
+    };
+    CHECK(switch_quietly(dev, 0) != 0);
+    CHECK(bias_tee_on());
+    fake_usb::control_hook = nullptr;
+    CHECK_EQ(rtlsdr_set_bias_tee(dev, 0), 0);
+    CHECK(!bias_tee_on());
     close_device(dev);
 }

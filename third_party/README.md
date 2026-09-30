@@ -35,6 +35,10 @@ and `tests/test_driver.cpp` runs the file against a fake libusb to check it.
   `rtlsdr_open()` forces the bias tee on only when the EEPROM was read and
   asks for that. Upstream decides from an uninitialised buffer when the
   EEPROM does not answer.
+- `rtlsdr_set_bias_tee_gpio()` returns -1 when a GPIO register cannot be
+  read or written, where upstream always returns 0, and writes nothing after
+  a failed read. The RTL-SDR Blog V4's input switch, which uses the same
+  function, then fails the tune instead of passing unnoticed.
 
 ## libusb
 

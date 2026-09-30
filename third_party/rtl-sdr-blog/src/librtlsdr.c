@@ -125,7 +125,7 @@ struct rtlsdr_dev {
 	enum rtlsdr_ds_mode direct_sampling_mode;
 };
 
-void rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val);
+int rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val);
 static int rtlsdr_set_if_freq(rtlsdr_dev_t *dev, uint32_t freq);
 
 /* generic tuner interface functions, shall be moved to the tuner implementations */
@@ -554,25 +554,31 @@ int rtlsdr_demod_write_reg(rtlsdr_dev_t *dev, uint8_t page, uint16_t addr, uint1
 	return (r == len) ? 0 : -1;
 }
 
-void rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val)
+/* Fern-RTLSDR: both return 0 or -1, and write nothing after a failed read,
+ * whose buffer holds no register value then. */
+int rtlsdr_set_gpio_bit(rtlsdr_dev_t *dev, uint8_t gpio, int val)
 {
-	uint16_t r;
+	uint8_t r;
 
 	gpio = 1 << gpio;
-	r = rtlsdr_read_reg(dev, SYSB, GPO, 1);
+	if (rtlsdr_read_array(dev, SYSB, GPO, &r, 1) != 1)
+		return -1;
 	r = val ? (r | gpio) : (r & ~gpio);
-	rtlsdr_write_reg(dev, SYSB, GPO, r, 1);
+	return rtlsdr_write_reg(dev, SYSB, GPO, r, 1) == 1 ? 0 : -1;
 }
 
-void rtlsdr_set_gpio_output(rtlsdr_dev_t *dev, uint8_t gpio)
+int rtlsdr_set_gpio_output(rtlsdr_dev_t *dev, uint8_t gpio)
 {
-	int r;
+	uint8_t r;
 	gpio = 1 << gpio;
 
-	r = rtlsdr_read_reg(dev, SYSB, GPD, 1);
-	rtlsdr_write_reg(dev, SYSB, GPD, r & ~gpio, 1);
-	r = rtlsdr_read_reg(dev, SYSB, GPOE, 1);
-	rtlsdr_write_reg(dev, SYSB, GPOE, r | gpio, 1);
+	if (rtlsdr_read_array(dev, SYSB, GPD, &r, 1) != 1 ||
+	    rtlsdr_write_reg(dev, SYSB, GPD, r & ~gpio, 1) != 1)
+		return -1;
+	if (rtlsdr_read_array(dev, SYSB, GPOE, &r, 1) != 1 ||
+	    rtlsdr_write_reg(dev, SYSB, GPOE, r | gpio, 1) != 1)
+		return -1;
+	return 0;
 }
 
 void rtlsdr_set_i2c_repeater(rtlsdr_dev_t *dev, int on)
@@ -2105,10 +2111,10 @@ int rtlsdr_set_bias_tee_gpio(rtlsdr_dev_t *dev, int gpio, int on)
 	if(gpio == 0 && dev->force_bt)
 		on = 1;
 
-	rtlsdr_set_gpio_output(dev, gpio);
-	rtlsdr_set_gpio_bit(dev, gpio, on);
-
-	return 0;
+	/* Fern-RTLSDR: report a failed switch instead of 0 */
+	if (rtlsdr_set_gpio_output(dev, gpio) != 0)
+		return -1;
+	return rtlsdr_set_gpio_bit(dev, gpio, on);
 }
 
 int rtlsdr_set_bias_tee(rtlsdr_dev_t *dev, int on)
