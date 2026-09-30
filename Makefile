@@ -55,6 +55,11 @@ RTLSDR_SRCS := librtlsdr.c tuner_e4k.c tuner_fc0012.c tuner_fc0013.c tuner_fc258
 LIBUSB_SRCS := core.c descriptor.c hotplug.c io.c sync.c strerror.c os/linux_usbfs.c os/linux_netlink.c \
 	os/events_posix.c os/threads_posix.c
 
+# The licences and authors of the libraries in the executable, for
+# fern-rtlsdr --notices; librtlsdr's licence is the module's own.
+NOTICES := LICENSE third_party/rtl-sdr-blog/AUTHORS third_party/libusb/COPYING third_party/libusb/AUTHORS
+NOTICES_SRC := build/gen/notices.cpp
+
 cxx_objs = $(patsubst %.cpp,$(1)/obj/%.o,$(2))
 rtlsdr_objs = $(patsubst %.c,$(1)/obj/rtlsdr/%.o,$(RTLSDR_SRCS))
 libusb_objs = $(patsubst %.c,$(1)/obj/libusb/%.o,$(LIBUSB_SRCS))
@@ -69,6 +74,9 @@ $(1)/obj/src/%.o: src/%.cpp
 $(1)/obj/tests/%.o: tests/%.cpp
 	@mkdir -p $$(@D)
 	$(3) $$(CXXFLAGS_BASE) $(4) -Isrc -MMD -MP -c $$< -o $$@
+$(1)/obj/gen/notices.o: $(NOTICES_SRC)
+	@mkdir -p $$(@D)
+	$(3) $$(CXXFLAGS_BASE) $(4) -c $$< -o $$@
 $(1)/obj/rtlsdr/%.o: third_party/rtl-sdr-blog/src/%.c
 	@mkdir -p $$(@D)
 	$(2) $$(RTLSDR_CFLAGS) $(4) $(5) -MMD -MP -c $$< -o $$@
@@ -88,8 +96,10 @@ $(eval $(call compile_rules,$(STATIC_DIR),$(CROSS)gcc,$(CROSS)g++,$(ARCH_FLAGS) 
 $(eval $(call compile_rules,$(TEST_DIR),$(CC),$(CXX),,))
 $(eval $(call compile_rules,$(ASAN_DIR),$(CC),$(CXX),$(SANITIZE),))
 
-NATIVE_OBJS := $(call cxx_objs,$(NATIVE_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(NATIVE_DIR))
+NATIVE_OBJS := $(call cxx_objs,$(NATIVE_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(NATIVE_DIR)) \
+	$(NATIVE_DIR)/obj/gen/notices.o
 STATIC_OBJS := $(call cxx_objs,$(STATIC_DIR),$(MODULE_SRCS) $(PROGRAM_SRCS)) $(call rtlsdr_objs,$(STATIC_DIR)) \
+	$(STATIC_DIR)/obj/gen/notices.o \
 	$(call libusb_objs,$(STATIC_DIR))
 # The tests run the R820T/R828D driver itself against a register file of
 # their own; see tests/test_tuning.cpp.
@@ -110,6 +120,11 @@ check-libusb:
 		"(Debian and Ubuntu: apt install libusb-1.0-0-dev pkg-config). make static needs neither." >&2; exit 1; }
 
 $(call rtlsdr_objs,$(NATIVE_DIR)) $(NATIVE_DIR)/obj/src/rtlsdr_backend.o: | check-libusb
+
+$(NOTICES_SRC): $(NOTICES) tools/embed_notices.py
+	@mkdir -p $(@D)
+	python3 tools/embed_notices.py $(NOTICES) > $@.tmp
+	mv $@.tmp $@
 
 build/fern-rtlsdr: $(NATIVE_OBJS) | check-libusb
 	$(CXX) -pthread -o $@ $^ $(SYSTEM_LIBUSB_LIBS)

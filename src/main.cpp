@@ -22,12 +22,17 @@
 
 using namespace fern;
 
+namespace fern {
+extern const char embedded_notices[];  // build/gen/notices.cpp, from tools/embed_notices.py
+}
+
 namespace {
 
 const char usage_text[] =
     "usage: fern-rtlsdr --describe          print the module and its settings as JSON\n"
     "       fern-rtlsdr --list-devices      print the RTL-SDRs this machine can see as JSON\n"
     "       fern-rtlsdr --fernsdr-module 1  run as a FernSDR input module (FernSDR starts it so)\n"
+    "       fern-rtlsdr --notices           print the licences of this module and the libraries in it\n"
     "       fern-rtlsdr --version\n";
 
 int print(const std::string& text) {
@@ -51,6 +56,14 @@ int list() {
     if (!listing.complete)
         _exit(status);  // a worker thread is still inside librtlsdr
     return status;
+}
+
+int notices() {
+    return print(std::string("fern-rtlsdr ") + module_version() +
+                 " is free software under the GNU General Public License, version 2 or later, and contains\n"
+                 "librtlsdr from RTL-SDR Blog V1.4.0 (GPL-2.0-or-later) and, in the static build, libusb 1.0.30\n"
+                 "(LGPL-2.1-or-later). The source of all three is at https://github.com/Steven9101/Fern-RTLSDR.\n\n" +
+                 embedded_notices);
 }
 
 int module() {
@@ -110,6 +123,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "fern-rtlsdr: this module speaks module API 1, not %s\n", argv[2]);
         return exit_status::usage;
     }
+    if (n == 1 && first == "--notices")
+        return notices();
     if (n == 1 && first == "--version")
         return print(std::string("fern-rtlsdr ") + module_version() + "\n");
     if (n == 1 && (first == "--help" || first == "-h"))

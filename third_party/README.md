@@ -47,7 +47,8 @@ script generates; it defines what configure would define on glibc Linux with
 
 Clone the new tag with `git clone --depth 1 --branch <tag> <url>`, copy the
 same files over the ones here, update the commit hashes above and the
-librtlsdr version in the start-up log line in `src/main.cpp`, and run
+librtlsdr and libusb versions in the start-up log line and in `notices()` in
+`src/main.cpp`, and run
 `make test`, `make static` and `make static ARCH=aarch64`. For librtlsdr, also
 check that `rtlsdr_open()`, `rtlsdr_read_async()`, `rtlsdr_close()`,
 `rtlsdr_set_center_freq()`, `rtlsdr_set_offset_tuning()` and

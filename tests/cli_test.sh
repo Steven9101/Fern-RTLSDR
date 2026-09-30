@@ -56,6 +56,17 @@ assert [s["key"] for s in d["settings"]] == ["device", "gain", "ppm", "rtl_agc",
     "direct_sampling", "offset_tuning", "bandwidth", "buffers"]
 ' "$tmp/describe.json"
 
+# The package holds only the executable, which must carry the licences of
+# the libraries built into it.
+"$bin" --notices </dev/null >"$tmp/notices" 2>/dev/null
+check "--notices exits 0" test $? -eq 0
+check "--notices carries the GPL, the LGPL and both author lists" sh -c '
+    grep -q "GNU GENERAL PUBLIC LICENSE" "$1" && grep -q "GNU LESSER GENERAL PUBLIC LICENSE" "$1" &&
+    grep -q "Version 2.1, February 1999" "$1" && grep -q "Steve Markgraf" "$1" &&
+    grep -q "Johannes Erdfelt" "$1"' - "$tmp/notices"
+"$bin" --help >"$tmp/help"
+check "--help names --notices" grep -q -- "--notices" "$tmp/help"
+
 out=$("$bin" --list-devices </dev/null)
 status=$?
 check "--list-devices exits 0" test "$status" -eq 0
